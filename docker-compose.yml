@@ -1,0 +1,70 @@
+services:
+  db:
+    image: mysql:8.4
+    container_name: pepe-finance-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: pepe_finance
+      MYSQL_USER: finance
+      MYSQL_PASSWORD: finance
+    ports:
+      - "3306:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ufinance", "-pfinance"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - finance-net
+
+  backend:
+    build:
+      context: ./backend
+    container_name: pepe-finance-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: finance
+      DB_PASSWORD: finance
+      DB_NAME: pepe_finance
+      CORS_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - finance-net
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    container_name: pepe-finance-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: "/api"
+      BACKEND_URL: "http://backend:8000"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - finance-net
+
+networks:
+  finance-net:
+    driver: bridge
+
+volumes:
+  db-data:

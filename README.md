@@ -173,6 +173,23 @@ Two files in `build/`:
 Extend the patterns in `etl/gbm/parser.py` (`_KIND_PATTERNS`) when new
 broker descriptions appear in real statements.
 
+## External market context
+
+### S&P 500 sector heat map (Finviz)
+
+For a quick read on what's moving in the broader US market while you work
+with the dashboard, open the published Finviz sector heat map:
+
+[finviz.com — S&P 500 daily sector map](https://finviz.com/published_map?t=sec&st=d1&f=050726&i=sec_d1_104420856)
+
+- `t=sec`  — sector view
+- `st=d1`  — 1-day performance
+- Tile area is weighted by market cap; colour is daily return (green ↑ / red ↓).
+
+This is an external read-only resource (no API integration). Use it side
+by side with the in-app **Heatmap** widget on the Dashboard to compare your
+holdings against the broader market.
+
 ## Makefile cheat-sheet
 
 ```bash

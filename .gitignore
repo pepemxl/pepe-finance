@@ -1,3 +1,5 @@
+LOCAL_DATA/*
+build/
 .claude/*
 # OS
 .DS_Store

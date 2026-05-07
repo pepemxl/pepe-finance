@@ -62,6 +62,20 @@ services:
     networks:
       - finance-net
 
+  # On-demand sub-service: parse GBM CFDI XMLs into CSVs.
+  # Run with:  docker compose --profile etl run --rm etl
+  etl:
+    profiles: ["etl"]
+    build:
+      context: .
+      dockerfile: etl/Dockerfile
+    container_name: pepe-finance-etl
+    volumes:
+      - ./LOCAL_DATA:/work/LOCAL_DATA:ro
+      - ./build:/work/build
+    networks:
+      - finance-net
+
 networks:
   finance-net:
     driver: bridge

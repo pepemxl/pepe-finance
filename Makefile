@@ -89,6 +89,18 @@ db-dump: ## Dump the dev database to ./db/dump.sql
 	$(DC) exec $(DB) mysqldump -ufinance -pfinance pepe_finance > db/dump.sql
 	@echo "Wrote db/dump.sql"
 
+##@ ETL
+
+.PHONY: etl-gbm
+etl-gbm: ## Parse GBM CFDI XMLs in LOCAL_DATA/GBM → build/gbm_*.csv (local)
+	python3 -m etl.gbm.cli \
+		--input LOCAL_DATA/GBM/ESTADOS_DE_CUENTA \
+		--output build
+
+.PHONY: etl-gbm-docker
+etl-gbm-docker: ## Same as etl-gbm but via the docker compose etl profile
+	$(DC) --profile etl run --rm etl
+
 ##@ Local (no docker)
 
 .PHONY: install

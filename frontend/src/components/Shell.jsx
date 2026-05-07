@@ -14,7 +14,7 @@ export function TopBar({ locale, setLocale, theme, setTheme, currency, setCurren
       <div className="brand">
         <div className="brand-mark">F</div>
         <div>FinanceStocks</div>
-        <span className="mono subtle" style={{ fontSize: 10, marginLeft: 4 }}>v2.4</span>
+        <span className="mono subtle" style={{ fontSize: 10, marginLeft: 4 }}>v0.1</span>
       </div>
       <div className="global-search">
         <input placeholder={locale === "es" ? "Buscar ticker, transacción, ISIN…" : "Search ticker, transaction, ISIN…"} />

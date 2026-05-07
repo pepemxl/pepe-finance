@@ -2,6 +2,10 @@
 
 FinanceStocks — desktop portfolio & tax tracker (MXN-primary, USD secondary).
 
+## Personal Tool
+
+This is a tool under development don't use this tool to compute your taxes.
+
 ## Stack
 
 - **Frontend** — React 18 + Vite (port `5173`)

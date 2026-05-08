@@ -76,6 +76,28 @@ services:
     networks:
       - finance-net
 
+  # On-demand sub-service: dump every MySQL table to timestamped CSV + Parquet.
+  # Run with:  docker compose --profile backup run --rm backup
+  backup:
+    profiles: ["backup"]
+    build:
+      context: .
+      dockerfile: etl/backup/Dockerfile
+    container_name: pepe-finance-backup
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: finance
+      DB_PASSWORD: finance
+      DB_NAME: pepe_finance
+    volumes:
+      - ./LOCAL_DATA:/work/LOCAL_DATA
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - finance-net
+
 networks:
   finance-net:
     driver: bridge

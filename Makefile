@@ -101,6 +101,18 @@ etl-gbm: ## Parse GBM CFDI XMLs in LOCAL_DATA/GBM → build/gbm_*.csv (local)
 etl-gbm-docker: ## Same as etl-gbm but via the docker compose etl profile
 	$(DC) --profile etl run --rm etl
 
+##@ Backup
+
+.PHONY: backup
+backup: ## Dump every MySQL table to LOCAL_DATA/BACKUPS/<table>_<ts>.{csv,parquet} (local)
+	python3 -m etl.backup.cli \
+		--output LOCAL_DATA/BACKUPS \
+		--host 127.0.0.1
+
+.PHONY: backup-docker
+backup-docker: ## Same as backup but via the docker compose backup profile
+	$(DC) --profile backup run --rm backup
+
 ##@ Local (no docker)
 
 .PHONY: install

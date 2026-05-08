@@ -1,7 +1,12 @@
-# etl/ — broker statement ingestion
+# etl/ — broker statement ingestion & backups
 
 Sub-services that turn broker artefacts into CSVs the rest of the system
-can consume.
+can consume, plus an on-demand database backup utility.
+
+| Sub-service     | Purpose                                                        |
+|-----------------|----------------------------------------------------------------|
+| `etl.gbm`       | Parse GBM CFDI 4.0 XMLs into `gbm_invoices.csv` / `gbm_movements.csv` |
+| `etl.backup`    | Dump every MySQL table to timestamped CSV + Parquet (see [`backup/README.md`](backup/README.md)) |
 
 ## `etl.gbm` — GBM CFDI 4.0 statements
 

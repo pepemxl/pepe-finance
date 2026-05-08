@@ -245,7 +245,40 @@ export function SellForm({ t, locale, setRoute, fxRate }) {
 
 export function TransactionsList({ t, locale, setRoute, transactions }) {
   const [filter, setFilter] = useState("ALL");
-  const rows = transactions.filter(tx => filter === "ALL" || tx.type === filter);
+  const [ticker, setTicker] = useState("ALL");
+  const [broker, setBroker] = useState("ALL");
+  const [year, setYear]     = useState("ALL");
+  const [query, setQuery]   = useState("");
+
+  const tickerOptions = React.useMemo(
+    () => Array.from(new Set(transactions.map(tx => tx.ticker))).sort(),
+    [transactions],
+  );
+  const brokerOptions = React.useMemo(
+    () => Array.from(new Set(transactions.map(tx => tx.broker))).sort(),
+    [transactions],
+  );
+  const yearOptions = React.useMemo(
+    () => Array.from(new Set(transactions.map(tx => new Date(tx.date).getFullYear())))
+      .sort((a, b) => b - a),
+    [transactions],
+  );
+
+  const rows = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return transactions.filter(tx => {
+      if (filter !== "ALL" && tx.type !== filter) return false;
+      if (ticker !== "ALL" && tx.ticker !== ticker) return false;
+      if (broker !== "ALL" && tx.broker !== broker) return false;
+      if (year   !== "ALL" && new Date(tx.date).getFullYear() !== Number(year)) return false;
+      if (q) {
+        const hay = `${tx.id} ${tx.ticker} ${tx.broker} ${tx.notes ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [transactions, filter, ticker, broker, year, query]);
+
   return (
     <main className="main">
       <div className="page-head">
@@ -263,9 +296,18 @@ export function TransactionsList({ t, locale, setRoute, transactions }) {
 
       <div className="filter-bar">
         <span className="lbl-inline">{t("filter_by")}:</span>
-        <select><option>{t("all")} {locale === "es" ? "tickers" : "tickers"}</option><option>AAPL</option><option>NVDA</option><option>TSLA</option></select>
-        <select><option>{t("all")} brokers</option><option>GBM+</option><option>Kuspit</option><option>Banorte</option></select>
-        <select><option>2026</option><option>2025</option><option>2024</option></select>
+        <select value={ticker} onChange={e => setTicker(e.target.value)}>
+          <option value="ALL">{t("all")} tickers</option>
+          {tickerOptions.map(tk => <option key={tk} value={tk}>{tk}</option>)}
+        </select>
+        <select value={broker} onChange={e => setBroker(e.target.value)}>
+          <option value="ALL">{t("all")} brokers</option>
+          {brokerOptions.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select value={year} onChange={e => setYear(e.target.value)}>
+          <option value="ALL">{locale === "es" ? "Todos los años" : "All years"}</option>
+          {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
         <div className="tabs">
           <button className={filter === "ALL"  ? "active" : ""} onClick={() => setFilter("ALL")}>{t("all")}</button>
           <button className={filter === "BUY"  ? "active" : ""} onClick={() => setFilter("BUY")}>BUY</button>
@@ -273,7 +315,12 @@ export function TransactionsList({ t, locale, setRoute, transactions }) {
           <button className={filter === "DIV"  ? "active" : ""} onClick={() => setFilter("DIV")}>DIV</button>
         </div>
         <div className="grow" />
-        <input placeholder={locale === "es" ? "Buscar…" : "Search…"} style={{ width: 200 }} />
+        <input
+          placeholder={locale === "es" ? "Buscar…" : "Search…"}
+          style={{ width: 200 }}
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+        />
       </div>
 
       <div className="table-wrap">
@@ -288,6 +335,13 @@ export function TransactionsList({ t, locale, setRoute, transactions }) {
             </tr>
           </thead>
           <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={13} className="subtle" style={{ textAlign: "center", padding: "16px" }}>
+                  {t("no_results")}
+                </td>
+              </tr>
+            )}
             {rows.map(tx => (
               <tr key={tx.id}>
                 <td className="mono subtle">{tx.id}</td>

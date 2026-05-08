@@ -56,16 +56,34 @@ function PerformanceChart({ t, performance }) {
 }
 
 export function HoldingsTable({ t, locale, currency, setRoute, positions, limit }) {
-  const rows = limit ? positions.slice(0, limit) : positions;
+  const [filter, setFilter] = React.useState("all");
+  const filtered = React.useMemo(() => {
+    if (filter === "winners") return positions.filter(p => (p.unrealizedMXN ?? 0) > 0);
+    if (filter === "losers")  return positions.filter(p => (p.unrealizedMXN ?? 0) < 0);
+    return positions;
+  }, [positions, filter]);
+  const rows = limit ? filtered.slice(0, limit) : filtered;
+  const tabs = [
+    { id: "all",     label: locale === "es" ? "Todas"      : "All" },
+    { id: "winners", label: locale === "es" ? "Ganadoras"  : "Winners" },
+    { id: "losers",  label: locale === "es" ? "Perdedoras" : "Losers" },
+  ];
   return (
     <div className="table-wrap">
       <div className="table-head">
         <h2>{t("holdings_title")}</h2>
         <div className="table-tools">
           <div className="tabs">
-            <button className="active">{locale === "es" ? "Todas" : "All"}</button>
-            <button>{locale === "es" ? "Ganadoras" : "Winners"}</button>
-            <button>{locale === "es" ? "Perdedoras" : "Losers"}</button>
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                className={filter === tab.id ? "active" : ""}
+                onClick={() => setFilter(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
           <button className="btn btn-sm">{t("export_csv")}</button>
         </div>
@@ -85,6 +103,13 @@ export function HoldingsTable({ t, locale, currency, setRoute, positions, limit 
           </tr>
         </thead>
         <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={9} className="subtle" style={{ textAlign: "center", padding: "16px" }}>
+                {locale === "es" ? "Sin resultados para este filtro." : "No holdings match this filter."}
+              </td>
+            </tr>
+          )}
           {rows.map(p => {
             const fmt = currency === "MXN" ? fmtMXN : fmtUSD;
             const mv  = currency === "MXN" ? p.marketValueMXN : p.marketValueUSD;

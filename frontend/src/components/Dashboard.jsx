@@ -1,21 +1,39 @@
 import React from "react";
 import { fmtMXN, fmtUSD, fmtPct, fmtNum, fmtDateLong } from "../lib/format.js";
 
+// Each entry maps to a slice of the trailing `performance` array (60 pts ≈ 6 months).
+// Ticks are anchored by *fraction* of the slice so labels follow whatever range is active.
+const PERF_RANGES = [
+  { id: "1D",  points: 2,  ticks: [{ at: 0, label: "−1d" },  { at: 1, label: "now" }] },
+  { id: "1W",  points: 3,  ticks: [{ at: 0, label: "−1w" },  { at: 1, label: "now" }] },
+  { id: "6M",  points: 60, ticks: [{ at: 0, label: "Nov" }, { at: 12/59, label: "Dec" }, { at: 24/59, label: "Jan" }, { at: 36/59, label: "Feb" }, { at: 48/59, label: "Mar" }, { at: 1, label: "May" }] },
+  { id: "1Y",  points: 60, ticks: [{ at: 0, label: "−1Y" }, { at: 0.5, label: "−6M" }, { at: 1, label: "now" }] },
+  { id: "YTD", points: 36, ticks: [{ at: 0, label: "Jan" }, { at: 9/35, label: "Feb" }, { at: 18/35, label: "Mar" }, { at: 27/35, label: "Apr" }, { at: 1, label: "May" }] },
+  { id: "ALL", points: 60, ticks: [{ at: 0, label: "Nov" }, { at: 12/59, label: "Dec" }, { at: 24/59, label: "Jan" }, { at: 36/59, label: "Feb" }, { at: 48/59, label: "Mar" }, { at: 1, label: "May" }] },
+];
+
 function PerformanceChart({ t, performance }) {
-  const data = performance;
+  const [rangeId, setRangeId] = React.useState("6M");
+  const range = PERF_RANGES.find(r => r.id === rangeId) ?? PERF_RANGES[2];
+  const data = React.useMemo(() => {
+    const n = Math.min(range.points, performance.length);
+    return performance.slice(-Math.max(n, 2));
+  }, [performance, range.points]);
+
   const min = Math.min(...data);
   const max = Math.max(...data);
+  const span = max - min || 1;
   const W = 800, H = 180, P = { l: 40, r: 12, t: 8, b: 18 };
   const pts = data.map((v, i) => {
     const x = P.l + (i / (data.length - 1)) * (W - P.l - P.r);
-    const y = P.t + (1 - (v - min) / (max - min)) * (H - P.t - P.b);
+    const y = P.t + (1 - (v - min) / span) * (H - P.t - P.b);
     return [x, y];
   });
   const path = pts.map(([x, y], i) => (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1)).join(" ");
   const area = path + ` L${pts[pts.length - 1][0].toFixed(1)} ${H - P.b} L${pts[0][0].toFixed(1)} ${H - P.b} Z`;
   const last = data[data.length - 1];
   const first = data[0];
-  const pct = ((last - first) / first) * 100;
+  const pct = first ? ((last - first) / first) * 100 : 0;
 
   return (
     <div className="chart-card">
@@ -23,8 +41,16 @@ function PerformanceChart({ t, performance }) {
         <div className="flex gap-12" style={{ alignItems: "baseline" }}>
           <h2>{t("performance")}</h2>
           <div className="tabs" style={{ marginLeft: 8 }}>
-            <button>1D</button><button>1W</button><button className="active">6M</button>
-            <button>1Y</button><button>YTD</button><button>ALL</button>
+            {PERF_RANGES.map(r => (
+              <button
+                key={r.id}
+                type="button"
+                className={r.id === rangeId ? "active" : ""}
+                onClick={() => setRangeId(r.id)}
+              >
+                {r.id}
+              </button>
+            ))}
           </div>
         </div>
         <div className="flex gap-12" style={{ alignItems: "baseline" }}>
@@ -35,7 +61,7 @@ function PerformanceChart({ t, performance }) {
       <svg className="chart-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
         {[0, 1, 2, 3, 4].map(i => {
           const y = P.t + (i / 4) * (H - P.t - P.b);
-          const v = max - (i / 4) * (max - min);
+          const v = max - (i / 4) * span;
           return (
             <g key={i}>
               <line className="grid" x1={P.l} x2={W - P.r} y1={y} y2={y} />
@@ -45,10 +71,9 @@ function PerformanceChart({ t, performance }) {
         })}
         <path className="area-fill" d={area} />
         <path className="area-line" d={path} />
-        {[0, 12, 24, 36, 48, 59].map((i, k) => {
-          const x = P.l + (i / (data.length - 1)) * (W - P.l - P.r);
-          const months = ["Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May"];
-          return <text key={k} className="axis-label" x={x} y={H - 4} textAnchor="middle">{months[k]}</text>;
+        {range.ticks.map((tk, k) => {
+          const x = P.l + tk.at * (W - P.l - P.r);
+          return <text key={k} className="axis-label" x={x} y={H - 4} textAnchor="middle">{tk.label}</text>;
         })}
       </svg>
     </div>

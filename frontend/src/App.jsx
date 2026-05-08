@@ -98,7 +98,8 @@ export default function App() {
   } else if (route === "taxes") {
     screen = <TaxReport t={t} locale={locale} setRoute={setRoute} taxBreakdown={taxBreakdown} realized={realized} />;
   } else if (route === "import") {
-    screen = <ImportCSV t={t} locale={locale} setRoute={setRoute} />;
+    screen = <ImportCSV t={t} locale={locale} setRoute={setRoute}
+              transactions={transactions} addTransaction={addTransaction} />;
   } else if (route.startsWith("detail:")) {
     screen = <StockDetail t={t} locale={locale} currency={currency} setRoute={setRoute}
               ticker={route.split(":")[1]} positions={positions} transactions={transactions} />;

@@ -723,7 +723,244 @@ export function TransactionsList({ t, locale, setRoute, transactions }) {
   );
 }
 
-export function ImportCSV({ t, locale, setRoute }) {
+// ---------- CSV import helpers ----------
+
+function parseCSVLine(line) {
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuotes) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else cur += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ",") { out.push(cur); cur = ""; }
+      else cur += c;
+    }
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+
+function parseCSV(text) {
+  const lines = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n").split("\n").filter(l => l.length);
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const headers = parseCSVLine(lines[0]);
+  const rows = lines.slice(1).map(line => {
+    const cells = parseCSVLine(line);
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = cells[i] ?? ""; });
+    return obj;
+  });
+  return { headers, rows };
+}
+
+const IMPORT_FIELDS = [
+  { key: "date",     required: true,  label: { es: "Fecha (YYYY-MM-DD)", en: "Date (YYYY-MM-DD)" } },
+  { key: "ticker",   required: true,  label: { es: "Ticker", en: "Ticker" } },
+  { key: "type",     required: true,  label: { es: "Tipo (BUY/SELL/DIV)", en: "Type (BUY/SELL/DIV)" } },
+  { key: "qty",      required: true,  label: { es: "Cantidad", en: "Quantity" } },
+  { key: "priceUSD", required: true,  label: { es: "Precio USD", en: "Price USD" } },
+  { key: "fxRate",   required: true,  label: { es: "Tipo de cambio", en: "FX rate" } },
+  { key: "fees",     required: false, label: { es: "Comisiones MXN", en: "Fees MXN" } },
+  { key: "broker",   required: false, label: { es: "Broker", en: "Broker" } },
+  { key: "account",  required: false, label: { es: "Cuenta", en: "Account" } },
+  { key: "notes",    required: false, label: { es: "Notas", en: "Notes" } },
+];
+
+const HEADER_HINTS = {
+  date:     ["date", "trade_date", "tradedate", "settlement date", "settlementdate", "fecha"],
+  ticker:   ["ticker", "symbol", "activo", "instrumento"],
+  type:     ["type", "action", "tipo", "operacion", "operación"],
+  qty:      ["qty", "quantity", "cantidad", "shares", "acciones"],
+  priceUSD: ["price", "priceusd", "price_usd", "precio", "precio_usd"],
+  fxRate:   ["fx", "fxrate", "fx_rate", "tc", "tipo_cambio", "tipodecambio"],
+  fees:     ["fees", "commission", "comision", "comisión", "feesmxn", "fees_mxn"],
+  broker:   ["broker", "casa_de_bolsa"],
+  account:  ["account", "account_number", "cuenta", "numero_cuenta"],
+  notes:    ["notes", "notas", "comentario"],
+};
+
+function autoMap(headers) {
+  const norm = (s) => s.toLowerCase().replace(/[\s_-]+/g, "");
+  const lower = headers.map(norm);
+  const map = {};
+  for (const [field, hints] of Object.entries(HEADER_HINTS)) {
+    map[field] = "";
+    for (const hint of hints) {
+      const idx = lower.indexOf(norm(hint));
+      if (idx >= 0) { map[field] = headers[idx]; break; }
+    }
+  }
+  return map;
+}
+
+function normalizeType(raw) {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (["buy", "compra", "b", "purchase"].includes(v))                  return "BUY";
+  if (["sell", "venta", "s", "sale", "disposal"].includes(v))          return "SELL";
+  if (["div", "dividendo", "dividend", "d"].includes(v))               return "DIV";
+  return null;
+}
+
+function buildBrokerLookup() {
+  const m = {};
+  for (const b of BUY_BROKERS) {
+    m[b.code] = b.code;
+    m[b.code.toLowerCase()] = b.code;
+    m[b.name] = b.code;
+    m[b.name.toLowerCase()] = b.code;
+  }
+  return m;
+}
+
+function rowToPayload(row, mapping, brokerLookup, externalId) {
+  const cell = (k) => mapping[k] ? String(row[mapping[k]] ?? "").trim() : "";
+  const errors = [];
+
+  const date = cell("date");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) errors.push(`bad date "${date}"`);
+
+  const ticker = cell("ticker").toUpperCase();
+  if (!ticker) errors.push("missing ticker");
+
+  const type = normalizeType(cell("type"));
+  if (!type) errors.push(`bad type "${cell("type")}"`);
+
+  const qty = Number(cell("qty"));
+  if (!(qty > 0)) errors.push("qty must be > 0");
+
+  const priceUSD = Number(cell("priceUSD"));
+  if (!(priceUSD > 0)) errors.push("price must be > 0");
+
+  const fxRate = Number(cell("fxRate"));
+  if (!(fxRate > 0)) errors.push("fx must be > 0");
+
+  const fees = mapping.fees ? Number(cell("fees") || 0) : 0;
+  const brokerRaw = cell("broker");
+  const brokerCode = brokerRaw ? (brokerLookup[brokerRaw] ?? brokerLookup[brokerRaw.toLowerCase()] ?? null) : null;
+  const account = cell("account") || null;
+  const notes   = cell("notes") || null;
+
+  if (errors.length) return { ok: false, errors };
+  return {
+    ok: true,
+    payload: {
+      external_id: externalId,
+      trade_date: date,
+      type,
+      ticker,
+      qty,
+      price_usd: priceUSD,
+      fx_rate: fxRate,
+      commission_pct: 0,
+      iva_pct: 0,
+      fees_mxn: Number.isFinite(fees) ? fees : 0,
+      broker_code: brokerCode,
+      account_number: account,
+      notes,
+    },
+  };
+}
+
+export function ImportCSV({ t, locale, setRoute, transactions, addTransaction }) {
+  const fileInputRef = React.useRef(null);
+  const [file, setFile] = useState(null);
+  const [headers, setHeaders] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [mapping, setMapping] = useState({});
+  const [dragOver, setDragOver] = useState(false);
+  const [parseError, setParseError] = useState(null);
+  const [validation, setValidation] = useState(null);
+  const [importState, setImportState] = useState({ kind: "idle" });
+
+  const brokerLookup = React.useMemo(buildBrokerLookup, []);
+
+  const baseExternal = React.useMemo(() => {
+    let max = 0;
+    for (const tx of transactions ?? []) {
+      const m = typeof tx.id === "string" && tx.id.match(/^TX-(\d+)$/);
+      if (m) max = Math.max(max, +m[1]);
+    }
+    return max;
+  }, [transactions]);
+
+  const handleFile = async (f) => {
+    if (!f) return;
+    setFile(f);
+    setParseError(null);
+    setValidation(null);
+    setImportState({ kind: "idle" });
+    try {
+      const text = await f.text();
+      const { headers: hh, rows: rr } = parseCSV(text);
+      if (hh.length === 0) throw new Error(locale === "es" ? "CSV vacío." : "CSV is empty.");
+      setHeaders(hh);
+      setRows(rr);
+      setMapping(autoMap(hh));
+    } catch (e) {
+      setParseError(e.message ?? String(e));
+      setHeaders([]); setRows([]); setMapping({});
+    }
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) handleFile(f);
+  };
+
+  const previewRow = rows[0];
+  const cellPreview = (k) => previewRow && mapping[k] ? String(previewRow[mapping[k]] ?? "") : "";
+
+  const buildPayloads = () => {
+    const out = { valid: [], invalid: [] };
+    rows.forEach((row, i) => {
+      const r = rowToPayload(row, mapping, brokerLookup, `TX-${baseExternal + i + 1}`);
+      if (r.ok) out.valid.push(r.payload);
+      else out.invalid.push({ index: i + 2, errors: r.errors }); // +2 = header row offset, 1-based
+    });
+    return out;
+  };
+
+  const validate = () => {
+    if (rows.length === 0) return;
+    setValidation(buildPayloads());
+  };
+
+  const runImport = async () => {
+    if (rows.length === 0) return;
+    const { valid, invalid } = buildPayloads();
+    setValidation({ valid, invalid });
+    if (valid.length === 0) {
+      setImportState({ kind: "error", msg: locale === "es" ? "No hay filas válidas." : "No valid rows to import." });
+      return;
+    }
+    setImportState({ kind: "importing", done: 0, total: valid.length, failures: [] });
+    const failures = [];
+    for (let i = 0; i < valid.length; i++) {
+      try {
+        await addTransaction(valid[i]);
+      } catch (e) {
+        failures.push({ id: valid[i].external_id, msg: e.message ?? String(e) });
+      }
+      setImportState(s => s.kind === "importing" ? { ...s, done: i + 1, failures: [...failures] } : s);
+    }
+    setImportState({ kind: "done", imported: valid.length - failures.length, failures, skipped: invalid.length });
+  };
+
+  const reset = () => {
+    setFile(null); setHeaders([]); setRows([]); setMapping({});
+    setValidation(null); setParseError(null); setImportState({ kind: "idle" });
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const importing = importState.kind === "importing";
+
   return (
     <main className="main">
       <div className="page-head">
@@ -732,37 +969,159 @@ export function ImportCSV({ t, locale, setRoute }) {
           <div className="sub">{locale === "es" ? "Importa transacciones desde tu broker" : "Import transactions from your broker"}</div>
         </div>
         <div className="actions">
-          <button className="btn btn-sm" onClick={() => setRoute("transactions")}>{t("cancel")}</button>
+          {file && <button className="btn btn-sm" onClick={reset} disabled={importing}>{locale === "es" ? "Limpiar" : "Clear"}</button>}
+          <button className="btn btn-sm" onClick={() => setRoute("transactions")} disabled={importing}>{t("cancel")}</button>
         </div>
       </div>
 
       <div style={{ padding: 24, maxWidth: 900 }}>
-        <div className="dropzone">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          style={{ display: "none" }}
+          onChange={e => handleFile(e.target.files?.[0])}
+        />
+
+        <div
+          className="dropzone"
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          style={{ cursor: "pointer", outline: dragOver ? "2px dashed var(--accent)" : undefined }}
+        >
           <div style={{ fontSize: 28, marginBottom: 8 }}>↑</div>
-          <strong>{locale === "es" ? "Arrastra tu archivo CSV aquí" : "Drop your CSV file here"}</strong>
-          <div style={{ marginTop: 4 }}>{locale === "es" ? "o" : "or"} <span style={{ color: "var(--accent)", textDecoration: "underline", cursor: "pointer" }}>{locale === "es" ? "selecciona un archivo" : "browse files"}</span></div>
-          <div style={{ marginTop: 12, fontSize: 11 }}>{locale === "es" ? "Formatos soportados: GBM+, Kuspit, Banorte, IBKR, formato genérico" : "Supported: GBM+, Kuspit, Banorte, IBKR, generic format"}</div>
+          {file ? (
+            <>
+              <strong>{file.name}</strong>
+              <div style={{ marginTop: 4, fontSize: 12 }}>
+                {rows.length} {locale === "es" ? "filas" : "rows"} · {headers.length} {locale === "es" ? "columnas" : "columns"}
+              </div>
+            </>
+          ) : (
+            <>
+              <strong>{locale === "es" ? "Arrastra tu archivo CSV aquí" : "Drop your CSV file here"}</strong>
+              <div style={{ marginTop: 4 }}>
+                {locale === "es" ? "o" : "or"}{" "}
+                <span style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                  {locale === "es" ? "selecciona un archivo" : "browse files"}
+                </span>
+              </div>
+              <div style={{ marginTop: 12, fontSize: 11 }}>
+                {locale === "es"
+                  ? "Encabezados detectados: date, ticker, type, qty, priceUSD, fxRate, fees, broker, account, notes."
+                  : "Auto-detected headers: date, ticker, type, qty, priceUSD, fxRate, fees, broker, account, notes."}
+              </div>
+            </>
+          )}
         </div>
 
-        <div className="calc-card" style={{ marginTop: 16 }}>
-          <h4>{locale === "es" ? "Mapeo de columnas" : "Column mapping"}</h4>
-          <table className="data" style={{ marginTop: 6 }}>
-            <thead><tr><th>{locale === "es" ? "Campo destino" : "Target field"}</th><th>{locale === "es" ? "Columna CSV" : "CSV column"}</th><th>{locale === "es" ? "Vista previa" : "Preview"}</th></tr></thead>
-            <tbody>
-              <tr><td>date</td><td className="mono">Settlement Date</td><td className="mono subtle">2026-04-28</td></tr>
-              <tr><td>ticker</td><td className="mono">Symbol</td><td className="mono subtle">TSLA</td></tr>
-              <tr><td>type</td><td className="mono">Action</td><td className="mono subtle">SELL</td></tr>
-              <tr><td>quantity</td><td className="mono">Qty</td><td className="mono subtle">10</td></tr>
-              <tr><td>priceUSD</td><td className="mono">Price</td><td className="mono subtle">204.50</td></tr>
-              <tr><td>fxRate</td><td className="mono">FX</td><td className="mono subtle">17.38</td></tr>
-              <tr><td>fees</td><td className="mono">Commission</td><td className="mono subtle">156.40</td></tr>
-            </tbody>
-          </table>
-          <div className="flex gap-8" style={{ marginTop: 12, justifyContent: "flex-end" }}>
-            <button className="btn btn-sm">{locale === "es" ? "Validar" : "Validate"}</button>
-            <button className="btn btn-primary btn-sm">{locale === "es" ? "Importar 24 registros" : "Import 24 rows"}</button>
+        {parseError && (
+          <div role="alert" style={{ marginTop: 12, padding: "8px 12px", background: "var(--bg-chip)", color: "var(--neg)", border: "1px solid var(--neg)", borderRadius: 4, fontSize: 13 }}>
+            {parseError}
           </div>
-        </div>
+        )}
+
+        {file && headers.length > 0 && (
+          <div className="calc-card" style={{ marginTop: 16 }}>
+            <h4>{locale === "es" ? "Mapeo de columnas" : "Column mapping"}</h4>
+            <table className="data" style={{ marginTop: 6 }}>
+              <thead>
+                <tr>
+                  <th>{locale === "es" ? "Campo destino" : "Target field"}</th>
+                  <th>{locale === "es" ? "Columna CSV" : "CSV column"}</th>
+                  <th>{locale === "es" ? "Vista previa" : "Preview"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {IMPORT_FIELDS.map(f => (
+                  <tr key={f.key}>
+                    <td>
+                      {f.label[locale] ?? f.label.en}
+                      {f.required && <span style={{ color: "var(--neg)" }}> *</span>}
+                    </td>
+                    <td>
+                      <select
+                        value={mapping[f.key] ?? ""}
+                        onChange={e => setMapping(m => ({ ...m, [f.key]: e.target.value }))}
+                        disabled={importing}
+                      >
+                        <option value="">{locale === "es" ? "— sin mapear —" : "— unmapped —"}</option>
+                        {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </td>
+                    <td className="mono subtle">{cellPreview(f.key) || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {validation && (
+              <div style={{ marginTop: 12, fontSize: 13 }}>
+                <div>
+                  <strong>{locale === "es" ? "Validación" : "Validation"}:</strong>{" "}
+                  <span style={{ color: "var(--pos)" }}>{validation.valid.length} {locale === "es" ? "válidas" : "valid"}</span>
+                  {" · "}
+                  <span style={{ color: validation.invalid.length ? "var(--neg)" : "var(--fg-subtle)" }}>
+                    {validation.invalid.length} {locale === "es" ? "con errores" : "with errors"}
+                  </span>
+                </div>
+                {validation.invalid.length > 0 && (
+                  <ul style={{ margin: "6px 0 0 16px", maxHeight: 140, overflow: "auto", fontSize: 12 }}>
+                    {validation.invalid.slice(0, 50).map((e, i) => (
+                      <li key={i}>{locale === "es" ? "Fila" : "Row"} {e.index}: {e.errors.join("; ")}</li>
+                    ))}
+                    {validation.invalid.length > 50 && (
+                      <li className="subtle">… {validation.invalid.length - 50} {locale === "es" ? "más" : "more"}</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {importState.kind === "importing" && (
+              <div style={{ marginTop: 12, fontSize: 13 }}>
+                {locale === "es" ? "Importando" : "Importing"} {importState.done}/{importState.total}…
+              </div>
+            )}
+            {importState.kind === "done" && (
+              <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--bg-chip)", color: importState.failures.length ? "var(--warn)" : "var(--pos)", border: `1px solid ${importState.failures.length ? "var(--warn)" : "var(--pos)"}`, borderRadius: 4, fontSize: 13 }}>
+                {locale === "es"
+                  ? `Importadas ${importState.imported}, fallidas ${importState.failures.length}, omitidas ${importState.skipped}.`
+                  : `Imported ${importState.imported}, failed ${importState.failures.length}, skipped ${importState.skipped}.`}
+                {importState.failures.length > 0 && (
+                  <ul style={{ margin: "6px 0 0 16px", fontSize: 12 }}>
+                    {importState.failures.slice(0, 20).map((f, i) => (
+                      <li key={i}>{f.id}: {f.msg}</li>
+                    ))}
+                  </ul>
+                )}
+                <div style={{ marginTop: 8 }}>
+                  <button className="btn btn-sm" onClick={() => setRoute("transactions")}>
+                    {locale === "es" ? "Ver transacciones →" : "View transactions →"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {importState.kind === "error" && (
+              <div role="alert" style={{ marginTop: 12, padding: "8px 12px", background: "var(--bg-chip)", color: "var(--neg)", border: "1px solid var(--neg)", borderRadius: 4, fontSize: 13 }}>
+                {importState.msg}
+              </div>
+            )}
+
+            <div className="flex gap-8" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+              <button className="btn btn-sm" onClick={validate} disabled={importing}>
+                {locale === "es" ? "Validar" : "Validate"}
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={runImport} disabled={importing || rows.length === 0}>
+                {importing
+                  ? (locale === "es" ? `Importando ${importState.done}/${importState.total}…` : `Importing ${importState.done}/${importState.total}…`)
+                  : (locale === "es" ? `Importar ${rows.length} registros` : `Import ${rows.length} rows`)}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );

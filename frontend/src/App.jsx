@@ -6,7 +6,7 @@ import { enrichTransactions } from "./lib/demoData.js";
 import { TopBar, Sidebar, StatusBar } from "./components/Shell.jsx";
 import { Dashboard, HoldingsTable } from "./components/Dashboard.jsx";
 import {
-  BuyForm, SellForm, TransactionsList, ImportCSV, TaxReport, StockDetail,
+  BuyForm, SellForm, DividendForm, TransactionsList, ImportCSV, TaxReport, StockDetail,
 } from "./components/Screens.jsx";
 
 export default function App() {
@@ -90,7 +90,11 @@ export default function App() {
     screen = <BuyForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate}
               transactions={transactions} addTransaction={addTransaction} />;
   } else if (route === "sell") {
-    screen = <SellForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate} />;
+    screen = <SellForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate}
+              transactions={transactions} addTransaction={addTransaction} />;
+  } else if (route === "dividend") {
+    screen = <DividendForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate}
+              transactions={transactions} addTransaction={addTransaction} />;
   } else if (route === "taxes") {
     screen = <TaxReport t={t} locale={locale} setRoute={setRoute} taxBreakdown={taxBreakdown} realized={realized} />;
   } else if (route === "import") {

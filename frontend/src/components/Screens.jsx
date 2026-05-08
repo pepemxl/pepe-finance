@@ -1,5 +1,48 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { fmtMXN, fmtUSD, fmtPct, fmtDate } from "../lib/format.js";
+import { api } from "../lib/api.js";
+
+function csvField(v) {
+  if (v == null) return "";
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadBlob(filename, text, mime = "text/csv;charset=utf-8;") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function printHtmlInPopup(title, body) {
+  const w = window.open("", "_blank", "width=900,height=720");
+  if (!w) return;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+<style>
+  body { font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; color: #111; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 24px 0 8px; }
+  .sub { color: #555; font-size: 11px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid #e5e5e5; text-align: left; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pos { color: #0a7d3a; }
+  .neg { color: #b21f24; }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0 16px; }
+  .summary .cell { border: 1px solid #ddd; padding: 8px; }
+  .summary .lbl { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: .08em; }
+  .summary .val { font-size: 16px; font-weight: 600; margin-top: 4px; }
+  @media print { @page { margin: 16mm; } }
+</style></head><body>${body}</body></html>`);
+  w.document.close();
+  w.onload = () => { w.focus(); w.print(); };
+}
 
 const BUY_BROKERS = [
   { code: "GBM",  name: "GBM+" },
@@ -136,7 +179,7 @@ export function BuyForm({ t, locale, setRoute, fxRate, transactions, addTransact
               <div className="tabs" style={{ width: "fit-content" }}>
                 <button className="active" style={{ padding: "5px 16px" }}>{t("purchase")}</button>
                 <button style={{ padding: "5px 16px" }} onClick={() => setRoute("sell")}>{t("sale")}</button>
-                <button style={{ padding: "5px 16px" }}>{t("dividend")}</button>
+                <button style={{ padding: "5px 16px" }} onClick={() => setRoute("dividend")}>{t("dividend")}</button>
               </div>
             </div>
             <div className="form-row"><label>{t("date")}</label>
@@ -213,12 +256,169 @@ export function BuyForm({ t, locale, setRoute, fxRate, transactions, addTransact
   );
 }
 
-export function SellForm({ t, locale, setRoute, fxRate }) {
+export function DividendForm({ t, locale, setRoute, fxRate, transactions, addTransaction }) {
+  const [qty, setQty] = useState(45);
+  const [price, setPrice] = useState(0.24);
+  const [fx, setFx] = useState(fxRate);
+  const [ticker, setTicker] = useState("AAPL");
+  const [date, setDate] = useState("2026-05-06");
+  const [brokerCode, setBrokerCode] = useState("GBM");
+  const [account, setAccount] = useState("PERSONAL-001");
+  const [notes, setNotes] = useState("");
+  const [status, setStatus] = useState({ kind: "idle" });
+
+  const grossUSD = qty * price;
+  const grossMXN = grossUSD * fx;
+
+  const validate = () => {
+    if (!ticker.trim()) return locale === "es" ? "Falta el ticker." : "Ticker is required.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return locale === "es" ? "Fecha inválida (YYYY-MM-DD)." : "Invalid date (YYYY-MM-DD).";
+    if (!(qty > 0)) return locale === "es" ? "Cantidad debe ser > 0." : "Quantity must be > 0.";
+    if (!(price > 0)) return locale === "es" ? "Dividendo por acción debe ser > 0." : "Dividend per share must be > 0.";
+    if (!(fx > 0)) return locale === "es" ? "FX debe ser > 0." : "FX rate must be > 0.";
+    return null;
+  };
+
+  const handleSave = async (stayOnForm) => {
+    const err = validate();
+    if (err) {
+      setStatus({ kind: "error", msg: err });
+      return;
+    }
+    const payload = {
+      external_id: nextExternalId(transactions),
+      trade_date: date,
+      type: "DIV",
+      ticker: ticker.trim().toUpperCase(),
+      qty: Number(qty),
+      price_usd: Number(price),
+      fx_rate: Number(fx),
+      commission_pct: 0,
+      iva_pct: 0,
+      fees_mxn: 0,
+      broker_code: brokerCode,
+      account_number: account.trim() || null,
+      notes: notes.trim() || null,
+    };
+
+    setStatus({ kind: "saving" });
+    try {
+      await addTransaction(payload);
+      setStatus({ kind: "saved", id: payload.external_id });
+      if (stayOnForm) {
+        setQty(0);
+        setPrice(0);
+        setNotes("");
+      } else {
+        setRoute("transactions");
+      }
+    } catch (e) {
+      setStatus({ kind: "error", msg: e.message ?? String(e) });
+    }
+  };
+
+  return (
+    <main className="main">
+      <div className="page-head">
+        <div>
+          <h1>{locale === "es" ? "Nuevo dividendo" : "New dividend"}</h1>
+          <div className="sub">{locale === "es" ? "Registrar pago de dividendo" : "Record a dividend payment"}</div>
+        </div>
+        <div className="actions">
+          <button className="btn btn-sm" onClick={() => setRoute("dashboard")} disabled={status.kind === "saving"}>{t("cancel")}</button>
+          <button className="btn btn-sm" onClick={() => handleSave(true)} disabled={status.kind === "saving"}>{t("save_and_new")}</button>
+          <button className="btn btn-primary btn-sm" onClick={() => handleSave(false)} disabled={status.kind === "saving"}>
+            {status.kind === "saving" ? (locale === "es" ? "Guardando…" : "Saving…") : t("save")}
+          </button>
+        </div>
+      </div>
+
+      {status.kind === "error" && (
+        <div className="form-status error" role="alert" style={{ margin: "8px 16px", padding: "8px 12px", background: "var(--bg-chip)", color: "var(--neg)", border: "1px solid var(--neg)", borderRadius: 4, fontSize: 13 }}>
+          {status.msg}
+        </div>
+      )}
+      {status.kind === "saved" && (
+        <div className="form-status saved" style={{ margin: "8px 16px", padding: "8px 12px", background: "var(--bg-chip)", color: "var(--pos)", border: "1px solid var(--pos)", borderRadius: 4, fontSize: 13 }}>
+          {locale === "es" ? `Guardado: ${status.id}` : `Saved: ${status.id}`}
+        </div>
+      )}
+
+      <div className="form-wrap">
+        <div className="form-main">
+          <div className="form-section">
+            <h3>{locale === "es" ? "Información básica" : "Basic info"}</h3>
+            <div className="form-row"><label>{t("transaction_type")}</label>
+              <div className="tabs" style={{ width: "fit-content" }}>
+                <button style={{ padding: "5px 16px" }} onClick={() => setRoute("buy")}>{t("purchase")}</button>
+                <button style={{ padding: "5px 16px" }} onClick={() => setRoute("sell")}>{t("sale")}</button>
+                <button className="active" style={{ padding: "5px 16px" }}>{t("dividend")}</button>
+              </div>
+            </div>
+            <div className="form-row"><label>{t("date")}</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                <input value={date.split("-")[0]} onChange={e => setDate(e.target.value + "-" + date.split("-")[1] + "-" + date.split("-")[2])} placeholder={locale === "es" ? "Año" : "Year"} />
+                <input value={date.split("-")[1]} onChange={e => setDate(date.split("-")[0] + "-" + e.target.value + "-" + date.split("-")[2])} placeholder={locale === "es" ? "Mes" : "Month"} />
+                <input value={date.split("-")[2]} onChange={e => setDate(date.split("-")[0] + "-" + date.split("-")[1] + "-" + e.target.value)} placeholder={locale === "es" ? "Día" : "Day"} />
+              </div>
+            </div>
+            <div className="form-row"><label>{t("instrument")}</label>
+              <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} placeholder="AAPL" />
+            </div>
+            <div className="form-row"><label>{t("broker")}</label>
+              <select value={brokerCode} onChange={e => setBrokerCode(e.target.value)}>
+                {BUY_BROKERS.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+              </select>
+            </div>
+            <div className="form-row"><label>{t("account")}</label>
+              <input value={account} onChange={e => setAccount(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h3>{locale === "es" ? "Monto" : "Amount"}</h3>
+            <div className="form-row"><label>{locale === "es" ? "Acciones con derecho" : "Eligible shares"}</label>
+              <input type="number" value={qty} onChange={e => setQty(+e.target.value)} />
+            </div>
+            <div className="form-row"><label>{locale === "es" ? "Dividendo por acción" : "Dividend per share"}</label>
+              <div className="input-suffix"><input type="number" step="0.0001" value={price} onChange={e => setPrice(+e.target.value)} /><span className="suffix">USD</span></div>
+            </div>
+            <div className="form-row"><label>{t("fx_rate")}</label>
+              <div className="input-suffix"><input type="number" step="0.0001" value={fx} onChange={e => setFx(+e.target.value)} /><span className="suffix">MXN/USD</span></div>
+            </div>
+            <div className="form-row"><label>{t("notes")}</label>
+              <textarea rows="2" value={notes} onChange={e => setNotes(e.target.value)} placeholder={locale === "es" ? "Dividendo Q2…" : "Q2 dividend…"} />
+            </div>
+          </div>
+        </div>
+
+        <div className="form-side">
+          <div className="calc-card">
+            <h4>{t("cost_breakdown")}</h4>
+            <div className="calc-row"><span className="lbl">{locale === "es" ? "Acciones" : "Shares"}</span><span>{qty}</span></div>
+            <div className="calc-row"><span className="lbl">{locale === "es" ? "× DPS" : "× DPS"}</span><span>{fmtUSD(price)}</span></div>
+            <div className="calc-row"><span className="lbl">{t("gross_amount")} (USD)</span><span>{fmtUSD(grossUSD)}</span></div>
+            <div className="calc-row subtle"><span className="lbl">× FX</span><span>{fx.toFixed(4)}</span></div>
+            <div className="calc-row total"><span className="lbl">{t("total_mxn")}</span><span>{fmtMXN(grossMXN)}</span></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export function SellForm({ t, locale, setRoute, fxRate, transactions, addTransaction }) {
   const [qty, setQty] = useState(5);
   const [price, setPrice] = useState(214.32);
   const [fx, setFx] = useState(fxRate);
   const [comm, setComm] = useState(0.0025);
   const [iva, setIva] = useState(0.16);
+  const [ticker, setTicker] = useState("AAPL");
+  const [date, setDate] = useState("2026-05-06");
+  const [brokerCode, setBrokerCode] = useState("GBM");
+  const [account, setAccount] = useState("PERSONAL-001");
+  const [notes, setNotes] = useState("");
+  const [status, setStatus] = useState({ kind: "idle" });
 
   const lots = [{ date: "2024-08-22", qty: 5, costUSD: 188.00, fx: 17.10 }];
   const grossUSD = qty * price;
@@ -233,6 +433,47 @@ export function SellForm({ t, locale, setRoute, fxRate }) {
   const taxRate = 0.30;
   const tax = Math.max(0, gain) * taxRate;
 
+  const validate = () => {
+    if (!ticker.trim()) return locale === "es" ? "Falta el ticker." : "Ticker is required.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return locale === "es" ? "Fecha inválida (YYYY-MM-DD)." : "Invalid date (YYYY-MM-DD).";
+    if (!(qty > 0)) return locale === "es" ? "Cantidad debe ser > 0." : "Quantity must be > 0.";
+    if (!(price > 0)) return locale === "es" ? "Precio debe ser > 0." : "Price must be > 0.";
+    if (!(fx > 0)) return locale === "es" ? "FX debe ser > 0." : "FX rate must be > 0.";
+    return null;
+  };
+
+  const handleSave = async () => {
+    const err = validate();
+    if (err) {
+      setStatus({ kind: "error", msg: err });
+      return;
+    }
+    const payload = {
+      external_id: nextExternalId(transactions),
+      trade_date: date,
+      type: "SELL",
+      ticker: ticker.trim().toUpperCase(),
+      qty: Number(qty),
+      price_usd: Number(price),
+      fx_rate: Number(fx),
+      commission_pct: Number(comm),
+      iva_pct: Number(iva),
+      fees_mxn: Number((commMXN + ivaMXN).toFixed(2)),
+      broker_code: brokerCode,
+      account_number: account.trim() || null,
+      notes: notes.trim() || null,
+    };
+
+    setStatus({ kind: "saving" });
+    try {
+      await addTransaction(payload);
+      setStatus({ kind: "saved", id: payload.external_id });
+      setRoute("transactions");
+    } catch (e) {
+      setStatus({ kind: "error", msg: e.message ?? String(e) });
+    }
+  };
+
   return (
     <main className="main">
       <div className="page-head">
@@ -241,10 +482,18 @@ export function SellForm({ t, locale, setRoute, fxRate }) {
           <div className="sub">{locale === "es" ? "Registrar venta — método FIFO" : "Record disposal — FIFO method"}</div>
         </div>
         <div className="actions">
-          <button className="btn btn-sm" onClick={() => setRoute("dashboard")}>{t("cancel")}</button>
-          <button className="btn btn-primary btn-sm" onClick={() => setRoute("transactions")}>{t("save")}</button>
+          <button className="btn btn-sm" onClick={() => setRoute("dashboard")} disabled={status.kind === "saving"}>{t("cancel")}</button>
+          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={status.kind === "saving"}>
+            {status.kind === "saving" ? (locale === "es" ? "Guardando…" : "Saving…") : t("save")}
+          </button>
         </div>
       </div>
+
+      {status.kind === "error" && (
+        <div className="form-status error" role="alert" style={{ margin: "8px 16px", padding: "8px 12px", background: "var(--bg-chip)", color: "var(--neg)", border: "1px solid var(--neg)", borderRadius: 4, fontSize: 13 }}>
+          {status.msg}
+        </div>
+      )}
 
       <div className="form-wrap">
         <div className="form-main">
@@ -254,17 +503,26 @@ export function SellForm({ t, locale, setRoute, fxRate }) {
               <div className="tabs" style={{ width: "fit-content" }}>
                 <button style={{ padding: "5px 16px" }} onClick={() => setRoute("buy")}>{t("purchase")}</button>
                 <button className="active" style={{ padding: "5px 16px" }}>{t("sale")}</button>
-                <button style={{ padding: "5px 16px" }}>{t("dividend")}</button>
+                <button style={{ padding: "5px 16px" }} onClick={() => setRoute("dividend")}>{t("dividend")}</button>
               </div>
             </div>
             <div className="form-row"><label>{t("date")}</label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                <input defaultValue="2026" /><input defaultValue="05" /><input defaultValue="06" />
+                <input value={date.split("-")[0]} onChange={e => setDate(e.target.value + "-" + date.split("-")[1] + "-" + date.split("-")[2])} placeholder={locale === "es" ? "Año" : "Year"} />
+                <input value={date.split("-")[1]} onChange={e => setDate(date.split("-")[0] + "-" + e.target.value + "-" + date.split("-")[2])} placeholder={locale === "es" ? "Mes" : "Month"} />
+                <input value={date.split("-")[2]} onChange={e => setDate(date.split("-")[0] + "-" + date.split("-")[1] + "-" + e.target.value)} placeholder={locale === "es" ? "Día" : "Day"} />
               </div>
             </div>
-            <div className="form-row"><label>{t("instrument")}</label><input defaultValue="AAPL · Apple Inc." /></div>
+            <div className="form-row"><label>{t("instrument")}</label>
+              <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} placeholder="AAPL" />
+            </div>
             <div className="form-row"><label>{t("broker")}</label>
-              <select><option>GBM+</option><option>Kuspit</option></select>
+              <select value={brokerCode} onChange={e => setBrokerCode(e.target.value)}>
+                {BUY_BROKERS.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+              </select>
+            </div>
+            <div className="form-row"><label>{t("account")}</label>
+              <input value={account} onChange={e => setAccount(e.target.value)} />
             </div>
           </div>
 
@@ -282,6 +540,9 @@ export function SellForm({ t, locale, setRoute, fxRate }) {
             </div>
             <div className="form-row"><label>{t("iva_commission")}</label>
               <div className="input-suffix"><input type="number" step="0.01" value={iva} onChange={e => setIva(+e.target.value)} /><span className="suffix">%</span></div>
+            </div>
+            <div className="form-row"><label>{t("notes")}</label>
+              <textarea rows="2" value={notes} onChange={e => setNotes(e.target.value)} placeholder={locale === "es" ? "Toma de utilidades…" : "Profit taking…"} />
             </div>
           </div>
 
@@ -508,21 +769,124 @@ export function ImportCSV({ t, locale, setRoute }) {
 }
 
 export function TaxReport({ t, locale, taxBreakdown, realized }) {
-  const tb = taxBreakdown;
+  const [year, setYear] = useState(taxBreakdown.year);
+  const [tb, setTb] = useState(taxBreakdown);
+  const [loading, setLoading] = useState(false);
+
+  // Refetch when the user picks a different year. Falls back silently to the
+  // last successfully-loaded breakdown when the API is unreachable.
+  useEffect(() => {
+    if (year === tb.year) return;
+    let cancelled = false;
+    setLoading(true);
+    api.taxBreakdown(year)
+      .then(d => { if (!cancelled) setTb(d); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [year]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const yearOptions = React.useMemo(() => {
+    const ys = new Set(realized.map(r => new Date(r.closeDate).getFullYear()));
+    ys.add(year); ys.add(taxBreakdown.year);
+    return [...ys].sort((a, b) => b - a);
+  }, [realized, year, taxBreakdown.year]);
+
+  const realizedForYear = React.useMemo(
+    () => realized.filter(r => new Date(r.closeDate).getFullYear() === year),
+    [realized, year],
+  );
+
   const netGain = tb.shortTermGain + tb.longTermGain - tb.shortTermLoss - tb.longTermLoss;
   const taxOwed = Math.max(0, netGain) * tb.rateApplied;
+
+  const exportCSV = () => {
+    const labels = locale === "es"
+      ? ["Cierre", "Apertura", "Ticker", "Cantidad", "Producto MXN", "Costo MXN", "Ganancia MXN", "Días", "Tipo", "Mercado", "ISR estimado MXN"]
+      : ["Close", "Open", "Ticker", "Qty", "Proceeds MXN", "Cost MXN", "Gain MXN", "Days", "Kind", "Market", "Est. tax MXN"];
+    const rows = [labels.join(",")];
+    for (const r of realizedForYear) {
+      const tax = r.gainMXN > 0 ? r.gainMXN * tb.rateApplied : 0;
+      rows.push([
+        r.closeDate, r.openDate, r.ticker, r.qty,
+        r.proceedsMXN, r.costMXN, r.gainMXN, r.days, r.kind, r.market,
+        tax.toFixed(2),
+      ].map(csvField).join(","));
+    }
+    rows.push("");
+    rows.push([locale === "es" ? "Resumen" : "Summary"].join(","));
+    rows.push([locale === "es" ? "Año fiscal" : "Fiscal year", year].join(","));
+    rows.push([locale === "es" ? "Ganancia CP" : "Short-term gain", tb.shortTermGain].join(","));
+    rows.push([locale === "es" ? "Ganancia LP" : "Long-term gain",  tb.longTermGain].join(","));
+    rows.push([locale === "es" ? "Pérdida CP"  : "Short-term loss", tb.shortTermLoss].join(","));
+    rows.push([locale === "es" ? "Pérdida LP"  : "Long-term loss",  tb.longTermLoss].join(","));
+    rows.push([locale === "es" ? "Ganancia neta" : "Net gain", netGain.toFixed(2)].join(","));
+    rows.push([locale === "es" ? "Tasa aplicada" : "Applied rate", tb.rateApplied].join(","));
+    rows.push([locale === "es" ? "ISR a pagar" : "Tax owed", taxOwed.toFixed(2)].join(","));
+    downloadBlob(`tax_report_${year}.csv`, rows.join("\n"));
+  };
+
+  const exportPDF = () => {
+    const fmtMoney = (n) => new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n);
+    const tableRows = realizedForYear.map(r => {
+      const tax = r.gainMXN > 0 ? r.gainMXN * tb.rateApplied : 0;
+      const cls = r.gainMXN >= 0 ? "pos" : "neg";
+      return `<tr>
+        <td>${r.closeDate}</td><td>${r.openDate}</td><td>${r.ticker}</td>
+        <td class="num">${r.qty}</td>
+        <td class="num">${fmtMoney(r.proceedsMXN)}</td>
+        <td class="num">${fmtMoney(r.costMXN)}</td>
+        <td class="num ${cls}">${fmtMoney(r.gainMXN)}</td>
+        <td class="num">${r.days}</td>
+        <td>${r.kind}</td>
+        <td class="num">${r.gainMXN > 0 ? fmtMoney(tax) : "—"}</td>
+      </tr>`;
+    }).join("");
+    const title = locale === "es" ? `Reporte fiscal ${year}` : `Tax report ${year}`;
+    const body = `
+      <h1>${title}</h1>
+      <div class="sub">${locale === "es" ? "Persona física · ISR sobre enajenación" : "Individual · Capital gains ISR"}</div>
+      <div class="summary">
+        <div class="cell"><div class="lbl">${locale === "es" ? "Ganancias" : "Capital gains"}</div><div class="val pos">${fmtMoney(tb.shortTermGain + tb.longTermGain)}</div></div>
+        <div class="cell"><div class="lbl">${locale === "es" ? "Pérdidas" : "Capital losses"}</div><div class="val neg">${fmtMoney(-(tb.shortTermLoss + tb.longTermLoss))}</div></div>
+        <div class="cell"><div class="lbl">${locale === "es" ? "Ganancia neta" : "Net gain"}</div><div class="val">${fmtMoney(netGain)}</div></div>
+        <div class="cell"><div class="lbl">${locale === "es" ? "ISR a pagar" : "Tax owed"} (${(tb.rateApplied * 100).toFixed(0)}%)</div><div class="val">${fmtMoney(taxOwed)}</div></div>
+      </div>
+      <h2>${locale === "es" ? "Operaciones cerradas" : "Realized closes"} (${realizedForYear.length})</h2>
+      <table>
+        <thead><tr>
+          <th>${locale === "es" ? "Cierre" : "Close"}</th>
+          <th>${locale === "es" ? "Apertura" : "Open"}</th>
+          <th>${t("ticker")}</th>
+          <th class="num">${t("qty")}</th>
+          <th class="num">${locale === "es" ? "Producto" : "Proceeds"}</th>
+          <th class="num">${t("cost_basis")}</th>
+          <th class="num">${t("realized_gain")}</th>
+          <th class="num">${t("days")}</th>
+          <th>${locale === "es" ? "Tipo" : "Kind"}</th>
+          <th class="num">${t("isr_due")}</th>
+        </tr></thead>
+        <tbody>${tableRows || `<tr><td colspan="10" style="text-align:center;color:#888">${t("no_results")}</td></tr>`}</tbody>
+      </table>`;
+    printHtmlInPopup(title, body);
+  };
 
   return (
     <main className="main">
       <div className="page-head">
         <div>
           <h1>{t("taxes")}</h1>
-          <div className="sub">{t("fiscal_year")} {tb.year} · {locale === "es" ? "Persona física, ISR sobre enajenación" : "Individual, capital gains ISR"}</div>
+          <div className="sub">
+            {t("fiscal_year")} {tb.year} · {locale === "es" ? "Persona física, ISR sobre enajenación" : "Individual, capital gains ISR"}
+            {loading && <span className="subtle" style={{ marginLeft: 8 }}>· {locale === "es" ? "cargando…" : "loading…"}</span>}
+          </div>
         </div>
         <div className="actions">
-          <select className="btn btn-sm" style={{ padding: "4px 8px" }}><option>2026</option><option>2025</option><option>2024</option></select>
-          <button className="btn btn-sm">{t("export_csv")}</button>
-          <button className="btn btn-primary btn-sm">{t("export_pdf")}</button>
+          <select className="btn btn-sm" style={{ padding: "4px 8px" }} value={year} onChange={e => setYear(Number(e.target.value))}>
+            {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <button className="btn btn-sm" onClick={exportCSV}>{t("export_csv")}</button>
+          <button className="btn btn-primary btn-sm" onClick={exportPDF}>{t("export_pdf")}</button>
         </div>
       </div>
 
@@ -566,11 +930,16 @@ export function TaxReport({ t, locale, taxBreakdown, realized }) {
       </div>
 
       <div className="table-wrap">
-        <div className="table-head"><h2>{locale === "es" ? "Operaciones cerradas — " : "Realized closes — "} {tb.year}</h2><span className="mono subtle" style={{ fontSize: 11 }}>FIFO</span></div>
+        <div className="table-head"><h2>{locale === "es" ? "Operaciones cerradas — " : "Realized closes — "} {year}</h2><span className="mono subtle" style={{ fontSize: 11 }}>FIFO · {realizedForYear.length}</span></div>
         <table className="data">
           <thead><tr><th>{locale === "es" ? "Cierre" : "Close"}</th><th>{locale === "es" ? "Apertura" : "Open"}</th><th>{t("ticker")}</th><th className="num">{t("qty")}</th><th className="num">{locale === "es" ? "Producto" : "Proceeds"}</th><th className="num">{t("cost_basis")}</th><th className="num">{t("realized_gain")}</th><th>{t("holding_period")}</th><th>{locale === "es" ? "Tipo" : "Type"}</th><th className="num">{t("isr_due")}</th></tr></thead>
           <tbody>
-            {realized.map((r, i) => (
+            {realizedForYear.length === 0 && (
+              <tr>
+                <td colSpan={10} className="subtle" style={{ textAlign: "center", padding: "16px" }}>{t("no_results")}</td>
+              </tr>
+            )}
+            {realizedForYear.map((r, i) => (
               <tr key={i}>
                 <td className="mono">{fmtDate(r.closeDate, locale)}</td>
                 <td className="mono subtle">{fmtDate(r.openDate, locale)}</td>

@@ -26,7 +26,7 @@ export const api = {
   realized:          () => get("/realized"),
   allocation:        () => get("/allocation"),
   performance:       () => get("/performance"),
-  taxBreakdown:      () => get("/tax/breakdown"),
+  taxBreakdown:      (year) => get(year != null ? `/tax/breakdown?year=${year}` : "/tax/breakdown"),
   fxRate:            () => get("/fx/usd-mxn"),
   createTransaction: (payload) => post("/transactions", payload),
 };

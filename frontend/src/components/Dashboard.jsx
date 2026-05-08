@@ -1,5 +1,6 @@
 import React from "react";
 import { fmtMXN, fmtUSD, fmtPct, fmtNum, fmtDateLong } from "../lib/format.js";
+import { csvField, downloadBlob, timestampForFilename } from "../lib/export.js";
 
 // Each entry maps to a slice of the trailing `performance` array (60 pts ≈ 6 months).
 // Ticks are anchored by *fraction* of the slice so labels follow whatever range is active.
@@ -93,6 +94,29 @@ export function HoldingsTable({ t, locale, currency, setRoute, positions, limit 
     { id: "winners", label: locale === "es" ? "Ganadoras"  : "Winners" },
     { id: "losers",  label: locale === "es" ? "Perdedoras" : "Losers" },
   ];
+
+  const exportCSV = () => {
+    const labels = locale === "es"
+      ? ["Ticker", "Nombre", "Cantidad", "Costo prom. USD", "Último USD", "Día %",
+         "Valor mercado MXN", "Valor mercado USD", "Costo base MXN", "Costo base USD",
+         "P&G no real. MXN", "P&G no real. USD", "P&G no real. %", "Peso %"]
+      : ["Ticker", "Name", "Qty", "Avg cost USD", "Last USD", "Day %",
+         "Market value MXN", "Market value USD", "Cost basis MXN", "Cost basis USD",
+         "Unrealized MXN", "Unrealized USD", "Unrealized %", "Weight %"];
+    const lines = [labels.join(",")];
+    for (const p of rows) {
+      lines.push([
+        p.ticker, p.name, p.qty,
+        p.avgCostUSD, p.lastUSD, p.dayPct,
+        p.marketValueMXN, p.marketValueUSD,
+        p.costBasisMXN,  p.costBasisUSD,
+        p.unrealizedMXN, p.unrealizedUSD, p.unrealizedPct,
+        p.weight,
+      ].map(csvField).join(","));
+    }
+    const suffix = filter === "all" ? "" : `_${filter}`;
+    downloadBlob(`holdings${suffix}_${timestampForFilename()}.csv`, lines.join("\n"));
+  };
   return (
     <div className="table-wrap">
       <div className="table-head">
@@ -110,7 +134,9 @@ export function HoldingsTable({ t, locale, currency, setRoute, positions, limit 
               </button>
             ))}
           </div>
-          <button className="btn btn-sm">{t("export_csv")}</button>
+          <button className="btn btn-sm" onClick={exportCSV} disabled={rows.length === 0}>
+            {t("export_csv")}
+          </button>
         </div>
       </div>
       <table className="data">

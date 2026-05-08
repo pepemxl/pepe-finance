@@ -1,24 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { fmtMXN, fmtUSD, fmtPct, fmtDate } from "../lib/format.js";
 import { api } from "../lib/api.js";
-
-function csvField(v) {
-  if (v == null) return "";
-  const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadBlob(filename, text, mime = "text/csv;charset=utf-8;") {
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+import { csvField, downloadBlob } from "../lib/export.js";
 
 function printHtmlInPopup(title, body) {
   const w = window.open("", "_blank", "width=900,height=720");

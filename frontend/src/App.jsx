@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useLocale, useTheme, useCurrency } from "./lib/hooks.js";
 import { loadPortfolio } from "./lib/portfolio.js";
+import { api } from "./lib/api.js";
+import { enrichTransactions } from "./lib/demoData.js";
 import { TopBar, Sidebar, StatusBar } from "./components/Shell.jsx";
 import { Dashboard, HoldingsTable } from "./components/Dashboard.jsx";
 import {
@@ -15,6 +17,45 @@ export default function App() {
   const [data, setData] = useState(null);
 
   useEffect(() => { loadPortfolio().then(setData); }, []);
+
+  const addTransaction = useCallback(async (payload) => {
+    let saved;
+    try {
+      saved = await api.createTransaction(payload);
+    } catch (err) {
+      // Backend unreachable or rejected — fall back to local-only append
+      // so the demo flow still works.
+      if (!data?.isLive) {
+        saved = {
+          id: payload.external_id,
+          date: payload.trade_date,
+          type: payload.type,
+          ticker: payload.ticker,
+          qty: payload.qty,
+          priceUSD: payload.price_usd,
+          fxRate: payload.fx_rate,
+          feesMXN: payload.fees_mxn,
+          broker: payload.broker_code ?? "—",
+          notes: payload.notes ?? null,
+        };
+      } else {
+        throw err;
+      }
+    }
+
+    setData(prev => {
+      if (!prev) return prev;
+      const [enriched] = enrichTransactions([saved]);
+      return { ...prev, transactions: [enriched, ...prev.transactions] };
+    });
+
+    if (data?.isLive) {
+      // Refresh in the background so positions / realized reflect the new tx.
+      loadPortfolio().then(setData).catch(() => {});
+    }
+
+    return saved;
+  }, [data?.isLive]);
 
   if (!data) {
     return <div style={{ padding: 40, fontFamily: "var(--font-sans)" }}>Loading…</div>;
@@ -46,7 +87,8 @@ export default function App() {
   } else if (route === "transactions") {
     screen = <TransactionsList t={t} locale={locale} setRoute={setRoute} transactions={transactions} />;
   } else if (route === "buy") {
-    screen = <BuyForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate} />;
+    screen = <BuyForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate}
+              transactions={transactions} addTransaction={addTransaction} />;
   } else if (route === "sell") {
     screen = <SellForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate} />;
   } else if (route === "taxes") {

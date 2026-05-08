@@ -1,22 +1,105 @@
 import React, { useState } from "react";
 import { fmtMXN, fmtUSD, fmtPct, fmtDate } from "../lib/format.js";
 
-export function BuyForm({ t, locale, setRoute, fxRate }) {
-  const [qty, setQty] = useState(10);
-  const [price, setPrice] = useState(214.32);
+const BUY_BROKERS = [
+  { code: "GBM",  name: "GBM+" },
+  { code: "KUS",  name: "Kuspit" },
+  { code: "BNT",  name: "Banorte Casa de Bolsa" },
+  { code: "ACT",  name: "Actinver" },
+  { code: "IBKR", name: "Interactive Brokers" },
+];
+
+const BUY_DEFAULTS = {
+  qty: 10, price: 214.32, comm: 0.0025, iva: 0.16,
+  ticker: "AAPL", date: "2026-05-06",
+  brokerCode: "GBM", account: "PERSONAL-001", notes: "",
+};
+
+function nextExternalId(transactions) {
+  let max = 0;
+  for (const tx of transactions ?? []) {
+    const m = typeof tx.id === "string" && tx.id.match(/^TX-(\d+)$/);
+    if (m) max = Math.max(max, +m[1]);
+  }
+  return `TX-${max + 1}`;
+}
+
+export function BuyForm({ t, locale, setRoute, fxRate, transactions, addTransaction }) {
+  const [qty, setQty] = useState(BUY_DEFAULTS.qty);
+  const [price, setPrice] = useState(BUY_DEFAULTS.price);
   const [fx, setFx] = useState(fxRate);
-  const [comm, setComm] = useState(0.0025);
-  const [iva, setIva] = useState(0.16);
-  const [ticker, setTicker] = useState("AAPL");
-  const [date, setDate] = useState("2026-05-06");
-  const [broker, setBroker] = useState("GBM+");
-  const [account, setAccount] = useState("PERSONAL-001");
+  const [comm, setComm] = useState(BUY_DEFAULTS.comm);
+  const [iva, setIva] = useState(BUY_DEFAULTS.iva);
+  const [ticker, setTicker] = useState(BUY_DEFAULTS.ticker);
+  const [date, setDate] = useState(BUY_DEFAULTS.date);
+  const [brokerCode, setBrokerCode] = useState(BUY_DEFAULTS.brokerCode);
+  const [account, setAccount] = useState(BUY_DEFAULTS.account);
+  const [notes, setNotes] = useState(BUY_DEFAULTS.notes);
+  const [status, setStatus] = useState({ kind: "idle" });
 
   const grossUSD = qty * price;
   const grossMXN = grossUSD * fx;
   const commMXN = grossMXN * comm;
   const ivaMXN = commMXN * iva;
   const totalMXN = grossMXN + commMXN + ivaMXN;
+
+  const resetForm = () => {
+    setQty(BUY_DEFAULTS.qty);
+    setPrice(BUY_DEFAULTS.price);
+    setFx(fxRate);
+    setComm(BUY_DEFAULTS.comm);
+    setIva(BUY_DEFAULTS.iva);
+    setTicker(BUY_DEFAULTS.ticker);
+    setDate(BUY_DEFAULTS.date);
+    setBrokerCode(BUY_DEFAULTS.brokerCode);
+    setAccount(BUY_DEFAULTS.account);
+    setNotes("");
+  };
+
+  const validate = () => {
+    if (!ticker.trim()) return locale === "es" ? "Falta el ticker." : "Ticker is required.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return locale === "es" ? "Fecha inválida (YYYY-MM-DD)." : "Invalid date (YYYY-MM-DD).";
+    if (!(qty > 0)) return locale === "es" ? "Cantidad debe ser > 0." : "Quantity must be > 0.";
+    if (!(price > 0)) return locale === "es" ? "Precio debe ser > 0." : "Price must be > 0.";
+    if (!(fx > 0)) return locale === "es" ? "FX debe ser > 0." : "FX rate must be > 0.";
+    return null;
+  };
+
+  const handleSave = async (stayOnForm) => {
+    const err = validate();
+    if (err) {
+      setStatus({ kind: "error", msg: err });
+      return;
+    }
+    const payload = {
+      external_id: nextExternalId(transactions),
+      trade_date: date,
+      type: "BUY",
+      ticker: ticker.trim().toUpperCase(),
+      qty: Number(qty),
+      price_usd: Number(price),
+      fx_rate: Number(fx),
+      commission_pct: Number(comm),
+      iva_pct: Number(iva),
+      fees_mxn: Number((commMXN + ivaMXN).toFixed(2)),
+      broker_code: brokerCode,
+      account_number: account.trim() || null,
+      notes: notes.trim() || null,
+    };
+
+    setStatus({ kind: "saving" });
+    try {
+      await addTransaction(payload);
+      setStatus({ kind: "saved", id: payload.external_id });
+      if (stayOnForm) {
+        resetForm();
+      } else {
+        setRoute("transactions");
+      }
+    } catch (e) {
+      setStatus({ kind: "error", msg: e.message ?? String(e) });
+    }
+  };
 
   return (
     <main className="main">
@@ -26,11 +109,24 @@ export function BuyForm({ t, locale, setRoute, fxRate }) {
           <div className="sub">{locale === "es" ? "Registrar adquisición de acciones" : "Record a stock acquisition"}</div>
         </div>
         <div className="actions">
-          <button className="btn btn-sm" onClick={() => setRoute("dashboard")}>{t("cancel")}</button>
-          <button className="btn btn-sm">{t("save_and_new")}</button>
-          <button className="btn btn-primary btn-sm" onClick={() => setRoute("transactions")}>{t("save")}</button>
+          <button className="btn btn-sm" onClick={() => setRoute("dashboard")} disabled={status.kind === "saving"}>{t("cancel")}</button>
+          <button className="btn btn-sm" onClick={() => handleSave(true)} disabled={status.kind === "saving"}>{t("save_and_new")}</button>
+          <button className="btn btn-primary btn-sm" onClick={() => handleSave(false)} disabled={status.kind === "saving"}>
+            {status.kind === "saving" ? (locale === "es" ? "Guardando…" : "Saving…") : t("save")}
+          </button>
         </div>
       </div>
+
+      {status.kind === "error" && (
+        <div className="form-status error" role="alert" style={{ margin: "8px 16px", padding: "8px 12px", background: "var(--bg-chip)", color: "var(--neg)", border: "1px solid var(--neg)", borderRadius: 4, fontSize: 13 }}>
+          {status.msg}
+        </div>
+      )}
+      {status.kind === "saved" && (
+        <div className="form-status saved" style={{ margin: "8px 16px", padding: "8px 12px", background: "var(--bg-chip)", color: "var(--pos)", border: "1px solid var(--pos)", borderRadius: 4, fontSize: 13 }}>
+          {locale === "es" ? `Guardado: ${status.id}` : `Saved: ${status.id}`}
+        </div>
+      )}
 
       <div className="form-wrap">
         <div className="form-main">
@@ -54,8 +150,8 @@ export function BuyForm({ t, locale, setRoute, fxRate }) {
               <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} placeholder="AAPL · NASDAQ · US0378331005" />
             </div>
             <div className="form-row"><label>{t("broker")}</label>
-              <select value={broker} onChange={e => setBroker(e.target.value)}>
-                <option>GBM+</option><option>Kuspit</option><option>Banorte Casa de Bolsa</option><option>Actinver</option><option>Interactive Brokers</option>
+              <select value={brokerCode} onChange={e => setBrokerCode(e.target.value)}>
+                {BUY_BROKERS.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
               </select>
             </div>
             <div className="form-row"><label>{t("account")}</label>
@@ -82,7 +178,7 @@ export function BuyForm({ t, locale, setRoute, fxRate }) {
             <div className="form-row"><label>{t("iva_commission")}</label>
               <div className="input-suffix"><input type="number" step="0.01" value={iva} onChange={e => setIva(+e.target.value)} /><span className="suffix">%</span></div>
             </div>
-            <div className="form-row"><label>{t("notes")}</label><textarea rows="2" placeholder={locale === "es" ? "Estrategia DCA mensual…" : "Monthly DCA strategy…"} /></div>
+            <div className="form-row"><label>{t("notes")}</label><textarea rows="2" value={notes} onChange={e => setNotes(e.target.value)} placeholder={locale === "es" ? "Estrategia DCA mensual…" : "Monthly DCA strategy…"} /></div>
           </div>
         </div>
 

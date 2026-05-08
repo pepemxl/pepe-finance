@@ -6,12 +6,27 @@ async function get(path) {
   return r.json();
 }
 
+async function post(path, body) {
+  const r = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let detail = `${r.status} ${r.statusText}`;
+    try { detail = (await r.json())?.detail ?? detail; } catch {}
+    throw new Error(detail);
+  }
+  return r.json();
+}
+
 export const api = {
-  positions:     () => get("/positions"),
-  transactions:  () => get("/transactions"),
-  realized:      () => get("/realized"),
-  allocation:    () => get("/allocation"),
-  performance:   () => get("/performance"),
-  taxBreakdown:  () => get("/tax/breakdown"),
-  fxRate:        () => get("/fx/usd-mxn"),
+  positions:         () => get("/positions"),
+  transactions:      () => get("/transactions"),
+  realized:          () => get("/realized"),
+  allocation:        () => get("/allocation"),
+  performance:       () => get("/performance"),
+  taxBreakdown:      () => get("/tax/breakdown"),
+  fxRate:            () => get("/fx/usd-mxn"),
+  createTransaction: (payload) => post("/transactions", payload),
 };

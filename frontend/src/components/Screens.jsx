@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { fmtMXN, fmtUSD, fmtPct, fmtDate } from "../lib/format.js";
 import { api } from "../lib/api.js";
-import { csvField, downloadBlob } from "../lib/export.js";
+import { csvField, downloadBlob, timestampForFilename } from "../lib/export.js";
 
 function printHtmlInPopup(title, body) {
   const w = window.open("", "_blank", "width=900,height=720");
@@ -619,6 +619,30 @@ export function TransactionsList({ t, locale, setRoute, transactions }) {
     });
   }, [transactions, filter, ticker, broker, year, query]);
 
+  const exportCSV = () => {
+    const labels = locale === "es"
+      ? ["ID", "Fecha", "Tipo", "Ticker", "Cantidad", "Precio USD", "FX", "Precio MXN", "Comisiones MXN", "Total MXN", "Broker", "Notas"]
+      : ["ID", "Date", "Type", "Ticker", "Qty", "Price USD", "FX", "Price MXN", "Fees MXN", "Total MXN", "Broker", "Notes"];
+    const lines = [labels.join(",")];
+    for (const tx of rows) {
+      lines.push([
+        tx.id,
+        tx.date,
+        tx.type,
+        tx.ticker,
+        tx.qty,
+        tx.priceUSD,
+        tx.fxRate,
+        (tx.priceUSD * tx.fxRate).toFixed(2),
+        tx.feesMXN,
+        tx.totalMXN,
+        tx.broker,
+        tx.notes ?? "",
+      ].map(csvField).join(","));
+    }
+    downloadBlob(`transactions_${timestampForFilename()}.csv`, lines.join("\n"));
+  };
+
   return (
     <main className="main">
       <div className="page-head">
@@ -628,7 +652,7 @@ export function TransactionsList({ t, locale, setRoute, transactions }) {
         </div>
         <div className="actions">
           <button className="btn btn-sm" onClick={() => setRoute("import")}>↑ {t("import")}</button>
-          <button className="btn btn-sm">{t("export_csv")}</button>
+          <button className="btn btn-sm" onClick={exportCSV} disabled={rows.length === 0}>{t("export_csv")}</button>
           <button className="btn btn-sm" onClick={() => setRoute("sell")}>− {t("new_sale")}</button>
           <button className="btn btn-primary btn-sm" onClick={() => setRoute("buy")}>+ {t("new_purchase")}</button>
         </div>

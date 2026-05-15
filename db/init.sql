@@ -213,20 +213,42 @@ VALUES
   ('TX-2829', '2026-02-28', 'BUY',  (SELECT id FROM instruments WHERE ticker='NVDA'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   3, 788.40, 17.04, 0.0025, 0.16, 132.40, NULL),
   ('TX-2828', '2026-02-12', 'SELL', (SELECT id FROM instruments WHERE ticker='AMZN'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   4, 178.20, 17.18, 0.0025, 0.16,  72.80, NULL),
   ('TX-2827', '2026-01-22', 'BUY',  (SELECT id FROM instruments WHERE ticker='TSLA'),   (SELECT id FROM accounts WHERE number='KUS-7741'),      10, 221.40, 17.45, 0.0025, 0.16, 162.40, NULL),
-  ('TX-2826', '2026-01-08', 'BUY',  (SELECT id FROM instruments WHERE ticker='MSFT'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   4, 398.60, 17.62, 0.0025, 0.16, 124.20, 'Inicio de año');
+  ('TX-2826', '2026-01-08', 'BUY',  (SELECT id FROM instruments WHERE ticker='MSFT'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   4, 398.60, 17.62, 0.0025, 0.16, 124.20, 'Inicio de año'),
+  -- Historical mock data 2020–2025 (multi-year tax-report testing)
+  ('TX-2750', '2020-02-10', 'BUY',  (SELECT id FROM instruments WHERE ticker='AAPL'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),  10,  78.50, 19.10, 0.0025, 0.16,  43.48, 'Apertura 2020'),
+  ('TX-2751', '2020-07-15', 'BUY',  (SELECT id FROM instruments WHERE ticker='MSFT'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   8, 210.00, 21.50, 0.0025, 0.16, 104.75, NULL),
+  ('TX-2752', '2020-11-20', 'SELL', (SELECT id FROM instruments WHERE ticker='AAPL'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   5, 118.00, 20.10, 0.0025, 0.16,  34.39, 'Toma parcial'),
+  ('TX-2755', '2021-01-12', 'BUY',  (SELECT id FROM instruments WHERE ticker='NVDA'),   (SELECT id FROM accounts WHERE number='KUS-7741'),       6, 130.00, 20.00, 0.0025, 0.16,  45.24, NULL),
+  ('TX-2756', '2021-05-03', 'BUY',  (SELECT id FROM instruments WHERE ticker='TSLA'),   (SELECT id FROM accounts WHERE number='KUS-7741'),       4, 220.00, 20.30, 0.0025, 0.16,  51.81, NULL),
+  ('TX-2757', '2021-09-28', 'SELL', (SELECT id FROM instruments WHERE ticker='MSFT'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   8, 285.00, 20.20, 0.0025, 0.16, 133.56, 'Cierre posición 2020'),
+  ('TX-2760', '2022-03-08', 'BUY',  (SELECT id FROM instruments WHERE ticker='GOOGL'),  (SELECT id FROM accounts WHERE number='KUS-7741'),       5, 135.00, 20.80, 0.0025, 0.16,  40.72, NULL),
+  ('TX-2761', '2022-06-21', 'BUY',  (SELECT id FROM instruments WHERE ticker='AMZN'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),  12, 110.00, 20.10, 0.0025, 0.16,  76.94, 'DCA mensual'),
+  ('TX-2762', '2022-12-05', 'SELL', (SELECT id FROM instruments WHERE ticker='NVDA'),   (SELECT id FROM accounts WHERE number='KUS-7741'),       6, 165.00, 19.50, 0.0025, 0.16,  55.98, 'Cierre posición 2021'),
+  ('TX-2765', '2023-02-14', 'BUY',  (SELECT id FROM instruments WHERE ticker='META'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   7, 175.00, 18.60, 0.0025, 0.16,  66.08, NULL),
+  ('TX-2766', '2023-08-30', 'BUY',  (SELECT id FROM instruments WHERE ticker='VOO'),    (SELECT id FROM accounts WHERE number='PERSONAL-001'),   3, 410.00, 17.40, 0.0025, 0.16,  62.07, NULL),
+  ('TX-2767', '2023-11-10', 'SELL', (SELECT id FROM instruments WHERE ticker='TSLA'),   (SELECT id FROM accounts WHERE number='KUS-7741'),       4, 240.00, 17.60, 0.0025, 0.16,  49.00, 'Cierre con pérdida'),
+  ('TX-2770', '2024-04-05', 'BUY',  (SELECT id FROM instruments WHERE ticker='GFNORTE'),(SELECT id FROM accounts WHERE number='BNT-3320'),      80,   8.20, 17.10, 0.0020, 0.16,  32.53, NULL),
+  ('TX-2771', '2024-09-18', 'BUY',  (SELECT id FROM instruments WHERE ticker='WALMEX'), (SELECT id FROM accounts WHERE number='BNT-3320'),     120,   3.90, 18.00, 0.0020, 0.16,  24.43, NULL),
+  ('TX-2772', '2024-10-22', 'SELL', (SELECT id FROM instruments WHERE ticker='GOOGL'),  (SELECT id FROM accounts WHERE number='KUS-7741'),       5, 168.00, 17.30, 0.0025, 0.16,  42.14, 'Cierre posición 2022'),
+  ('TX-2775', '2025-01-20', 'BUY',  (SELECT id FROM instruments WHERE ticker='AAPL'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),  15, 185.00, 17.80, 0.0025, 0.16, 143.25, 'Inicio de año'),
+  ('TX-2776', '2025-06-12', 'BUY',  (SELECT id FROM instruments WHERE ticker='NVDA'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),   4, 720.00, 17.25, 0.0025, 0.16, 144.07, NULL),
+  ('TX-2777', '2025-07-08', 'SELL', (SELECT id FROM instruments WHERE ticker='AMZN'),   (SELECT id FROM accounts WHERE number='PERSONAL-001'),  12, 150.00, 17.40, 0.0025, 0.16,  90.83, 'Cierre posición 2022');
 
-INSERT INTO realized_lots (instrument_id, open_date, close_date, qty, proceeds_mxn, cost_mxn, gain_mxn, holding_days, kind, market) VALUES
-  ((SELECT id FROM instruments WHERE ticker='TSLA'), '2025-09-12', '2026-04-28', 10, 35552.10, 41840.20, -6288.10, 228, 'long',  'foreign'),
-  ((SELECT id FROM instruments WHERE ticker='META'), '2025-11-04', '2026-04-10',  3, 26243.20, 16312.40,  9930.80, 157, 'short', 'foreign'),
-  ((SELECT id FROM instruments WHERE ticker='AAPL'), '2024-08-22', '2026-03-15',  5, 17616.40, 11824.00,  5792.40, 570, 'long',  'foreign'),
-  ((SELECT id FROM instruments WHERE ticker='AMZN'), '2025-06-18', '2026-02-12',  4, 12243.60, 10184.10,  2059.50, 239, 'short', 'foreign');
+-- realized_lots is a DERIVED table: the backend rebuilds it from the
+-- transactions ledger via FIFO matching (see app/fifo.py) on startup and
+-- after every transaction create/update. No seed rows here on purpose.
 
 INSERT INTO tax_settings (fiscal_year, rate_applied, notes) VALUES
+  (2020, 0.30, 'Tasa marginal estimada ISR PF'),
+  (2021, 0.30, 'Tasa marginal estimada ISR PF'),
+  (2022, 0.30, 'Tasa marginal estimada ISR PF'),
+  (2023, 0.30, 'Tasa marginal estimada ISR PF'),
   (2024, 0.30, 'Tasa marginal estimada ISR PF'),
   (2025, 0.30, 'Tasa marginal estimada ISR PF'),
   (2026, 0.30, 'Tasa marginal estimada ISR PF');
 
 INSERT INTO loss_carry_forward (origin_year, loss_mxn, used_mxn, expires_year) VALUES
+  (2023,  968.00,    0.00, 2033),
   (2024, 4520.30, 1679.80, 2034),
   (2025, 1284.10,    0.00, 2035),
   (2026, 6288.10, 6288.10, 2036);

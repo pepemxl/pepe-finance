@@ -47,6 +47,25 @@ export const TRANSACTIONS_RAW = [
   { id: "TX-2828", date: "2026-02-12", type: "SELL", ticker: "AMZN",    qty:  4,  priceUSD:  178.20, fxRate: 17.18, feesMXN:  72.80, broker: "GBM+",    notes: "" },
   { id: "TX-2827", date: "2026-01-22", type: "BUY",  ticker: "TSLA",    qty: 10,  priceUSD:  221.40, fxRate: 17.45, feesMXN: 162.40, broker: "Kuspit",  notes: "" },
   { id: "TX-2826", date: "2026-01-08", type: "BUY",  ticker: "MSFT",    qty:  4,  priceUSD:  398.60, fxRate: 17.62, feesMXN: 124.20, broker: "GBM+",    notes: "Inicio de año" },
+  // Historical mock data 2020–2025 (multi-year tax-report testing)
+  { id: "TX-2777", date: "2025-07-08", type: "SELL", ticker: "AMZN",    qty: 12,  priceUSD:  150.00, fxRate: 17.40, feesMXN:  90.83, broker: "GBM+",    notes: "Cierre posición 2022" },
+  { id: "TX-2776", date: "2025-06-12", type: "BUY",  ticker: "NVDA",    qty:  4,  priceUSD:  720.00, fxRate: 17.25, feesMXN: 144.07, broker: "GBM+",    notes: "" },
+  { id: "TX-2775", date: "2025-01-20", type: "BUY",  ticker: "AAPL",    qty: 15,  priceUSD:  185.00, fxRate: 17.80, feesMXN: 143.25, broker: "GBM+",    notes: "Inicio de año" },
+  { id: "TX-2772", date: "2024-10-22", type: "SELL", ticker: "GOOGL",   qty:  5,  priceUSD:  168.00, fxRate: 17.30, feesMXN:  42.14, broker: "Kuspit",  notes: "Cierre posición 2022" },
+  { id: "TX-2771", date: "2024-09-18", type: "BUY",  ticker: "WALMEX",  qty: 120, priceUSD:    3.90, fxRate: 18.00, feesMXN:  24.43, broker: "Banorte", notes: "" },
+  { id: "TX-2770", date: "2024-04-05", type: "BUY",  ticker: "GFNORTE", qty: 80,  priceUSD:    8.20, fxRate: 17.10, feesMXN:  32.53, broker: "Banorte", notes: "" },
+  { id: "TX-2767", date: "2023-11-10", type: "SELL", ticker: "TSLA",    qty:  4,  priceUSD:  240.00, fxRate: 17.60, feesMXN:  49.00, broker: "Kuspit",  notes: "Cierre con pérdida" },
+  { id: "TX-2766", date: "2023-08-30", type: "BUY",  ticker: "VOO",     qty:  3,  priceUSD:  410.00, fxRate: 17.40, feesMXN:  62.07, broker: "GBM+",    notes: "" },
+  { id: "TX-2765", date: "2023-02-14", type: "BUY",  ticker: "META",    qty:  7,  priceUSD:  175.00, fxRate: 18.60, feesMXN:  66.08, broker: "GBM+",    notes: "" },
+  { id: "TX-2762", date: "2022-12-05", type: "SELL", ticker: "NVDA",    qty:  6,  priceUSD:  165.00, fxRate: 19.50, feesMXN:  55.98, broker: "Kuspit",  notes: "Cierre posición 2021" },
+  { id: "TX-2761", date: "2022-06-21", type: "BUY",  ticker: "AMZN",    qty: 12,  priceUSD:  110.00, fxRate: 20.10, feesMXN:  76.94, broker: "GBM+",    notes: "DCA mensual" },
+  { id: "TX-2760", date: "2022-03-08", type: "BUY",  ticker: "GOOGL",   qty:  5,  priceUSD:  135.00, fxRate: 20.80, feesMXN:  40.72, broker: "Kuspit",  notes: "" },
+  { id: "TX-2757", date: "2021-09-28", type: "SELL", ticker: "MSFT",    qty:  8,  priceUSD:  285.00, fxRate: 20.20, feesMXN: 133.56, broker: "GBM+",    notes: "Cierre posición 2020" },
+  { id: "TX-2756", date: "2021-05-03", type: "BUY",  ticker: "TSLA",    qty:  4,  priceUSD:  220.00, fxRate: 20.30, feesMXN:  51.81, broker: "Kuspit",  notes: "" },
+  { id: "TX-2755", date: "2021-01-12", type: "BUY",  ticker: "NVDA",    qty:  6,  priceUSD:  130.00, fxRate: 20.00, feesMXN:  45.24, broker: "Kuspit",  notes: "" },
+  { id: "TX-2752", date: "2020-11-20", type: "SELL", ticker: "AAPL",    qty:  5,  priceUSD:  118.00, fxRate: 20.10, feesMXN:  34.39, broker: "GBM+",    notes: "Toma parcial" },
+  { id: "TX-2751", date: "2020-07-15", type: "BUY",  ticker: "MSFT",    qty:  8,  priceUSD:  210.00, fxRate: 21.50, feesMXN: 104.75, broker: "GBM+",    notes: "" },
+  { id: "TX-2750", date: "2020-02-10", type: "BUY",  ticker: "AAPL",    qty: 10,  priceUSD:   78.50, fxRate: 19.10, feesMXN:  43.48, broker: "GBM+",    notes: "Apertura 2020" },
 ];
 
 export function enrichTransactions(rows) {
@@ -58,12 +77,9 @@ export function enrichTransactions(rows) {
   });
 }
 
-export const REALIZED = [
-  { closeDate: "2026-04-28", openDate: "2025-09-12", ticker: "TSLA", qty: 10, proceedsMXN: 35552.10, costMXN: 41840.20, gainMXN: -6288.10, days: 228, kind: "long",  market: "foreign" },
-  { closeDate: "2026-04-10", openDate: "2025-11-04", ticker: "META", qty:  3, proceedsMXN: 26243.20, costMXN: 16312.40, gainMXN:  9930.80, days: 157, kind: "short", market: "foreign" },
-  { closeDate: "2026-03-15", openDate: "2024-08-22", ticker: "AAPL", qty:  5, proceedsMXN: 17616.40, costMXN: 11824.00, gainMXN:  5792.40, days: 570, kind: "long",  market: "foreign" },
-  { closeDate: "2026-02-12", openDate: "2025-06-18", ticker: "AMZN", qty:  4, proceedsMXN: 12243.60, costMXN: 10184.10, gainMXN:  2059.50, days: 239, kind: "short", market: "foreign" },
-];
+// realized_lots is a DERIVED dataset — computeRealizedLots() in fifo.js rebuilds
+// it from TRANSACTIONS_RAW via FIFO matching, mirroring the backend. No static
+// REALIZED array on purpose.
 
 export const ALLOCATION = [
   { sector: "Technology",     pct: 34.5, ret:  12.4 },

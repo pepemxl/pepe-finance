@@ -3,10 +3,12 @@ import { useLocale, useTheme, useCurrency } from "./lib/hooks.js";
 import { loadPortfolio } from "./lib/portfolio.js";
 import { api } from "./lib/api.js";
 import { enrichTransactions } from "./lib/demoData.js";
+import { computeRealizedLots, computeTaxBreakdown } from "./lib/fifo.js";
 import { TopBar, Sidebar, StatusBar } from "./components/Shell.jsx";
 import { Dashboard, HoldingsTable } from "./components/Dashboard.jsx";
 import {
-  BuyForm, SellForm, DividendForm, TransactionsList, ImportCSV, TaxReport, StockDetail,
+  BuyForm, SellForm, DividendForm, TransactionsList, EditTransactionForm,
+  ImportCSV, TaxReport, StockDetail,
 } from "./components/Screens.jsx";
 
 export default function App() {
@@ -46,7 +48,16 @@ export default function App() {
     setData(prev => {
       if (!prev) return prev;
       const [enriched] = enrichTransactions([saved]);
-      return { ...prev, transactions: [enriched, ...prev.transactions] };
+      const transactions = [enriched, ...prev.transactions];
+      if (prev.isLive) return { ...prev, transactions };
+      // Offline: re-derive realized lots & tax breakdown via FIFO, like the backend.
+      const realized = computeRealizedLots(transactions);
+      return {
+        ...prev,
+        transactions,
+        realized,
+        taxBreakdown: computeTaxBreakdown(realized, prev.taxBreakdown.year, prev.taxBreakdown),
+      };
     });
 
     if (data?.isLive) {
@@ -56,6 +67,55 @@ export default function App() {
 
     return saved;
   }, [data?.isLive]);
+
+  const updateTransaction = useCallback(async (externalId, payload) => {
+    let saved;
+    try {
+      saved = await api.updateTransaction(externalId, payload);
+    } catch (err) {
+      // Backend unreachable or rejected — fall back to local-only edit
+      // so the demo flow still works.
+      if (!data?.isLive) {
+        const existing = data?.transactions.find(tx => tx.id === externalId) ?? {};
+        saved = {
+          ...existing,
+          id: externalId,
+          date: payload.trade_date,
+          type: payload.type,
+          ticker: payload.ticker,
+          qty: payload.qty,
+          priceUSD: payload.price_usd,
+          fxRate: payload.fx_rate,
+          feesMXN: payload.fees_mxn,
+          notes: payload.notes ?? null,
+        };
+      } else {
+        throw err;
+      }
+    }
+
+    setData(prev => {
+      if (!prev) return prev;
+      const [enriched] = enrichTransactions([saved]);
+      const transactions = prev.transactions.map(tx => tx.id === externalId ? enriched : tx);
+      if (prev.isLive) return { ...prev, transactions };
+      // Offline: re-derive realized lots & tax breakdown via FIFO, like the backend.
+      const realized = computeRealizedLots(transactions);
+      return {
+        ...prev,
+        transactions,
+        realized,
+        taxBreakdown: computeTaxBreakdown(realized, prev.taxBreakdown.year, prev.taxBreakdown),
+      };
+    });
+
+    if (data?.isLive) {
+      // Refresh in the background so positions / realized reflect the edit.
+      loadPortfolio().then(setData).catch(() => {});
+    }
+
+    return saved;
+  }, [data?.isLive, data?.transactions]);
 
   if (!data) {
     return <div style={{ padding: 40, fontFamily: "var(--font-sans)" }}>Loading…</div>;
@@ -86,6 +146,12 @@ export default function App() {
     );
   } else if (route === "transactions") {
     screen = <TransactionsList t={t} locale={locale} setRoute={setRoute} transactions={transactions} />;
+  } else if (route.startsWith("edit:")) {
+    const tx = transactions.find(x => x.id === route.slice(5));
+    screen = tx
+      ? <EditTransactionForm t={t} locale={locale} setRoute={setRoute}
+                transaction={tx} updateTransaction={updateTransaction} />
+      : <div style={{ padding: 40 }}>404</div>;
   } else if (route === "buy") {
     screen = <BuyForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate}
               transactions={transactions} addTransaction={addTransaction} />;
@@ -96,7 +162,7 @@ export default function App() {
     screen = <DividendForm t={t} locale={locale} setRoute={setRoute} fxRate={fxRate}
               transactions={transactions} addTransaction={addTransaction} />;
   } else if (route === "taxes") {
-    screen = <TaxReport t={t} locale={locale} setRoute={setRoute} taxBreakdown={taxBreakdown} realized={realized} />;
+    screen = <TaxReport t={t} locale={locale} setRoute={setRoute} taxBreakdown={taxBreakdown} realized={realized} transactions={transactions} />;
   } else if (route === "import") {
     screen = <ImportCSV t={t} locale={locale} setRoute={setRoute}
               transactions={transactions} addTransaction={addTransaction} />;

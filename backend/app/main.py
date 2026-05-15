@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .config import settings
-from .database import engine
+from .database import SessionLocal, engine
+from .fifo import recompute_realized_lots
 from .routers import portfolio
 
 
@@ -13,6 +14,10 @@ from .routers import portfolio
 async def lifespan(_: FastAPI):
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
+    # realized_lots is derived from the transactions ledger — rebuild it on boot
+    # so tax reporting is consistent even if the table was seeded or edited.
+    with SessionLocal() as db:
+        recompute_realized_lots(db)
     yield
 
 

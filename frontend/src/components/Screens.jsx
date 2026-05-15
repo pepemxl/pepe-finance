@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { fmtMXN, fmtUSD, fmtPct, fmtDate } from "../lib/format.js";
 import { api } from "../lib/api.js";
 import { csvField, downloadBlob, timestampForFilename } from "../lib/export.js";
+import { computeTaxBreakdown } from "../lib/fifo.js";
 
 function printHtmlInPopup(title, body) {
   const w = window.open("", "_blank", "width=900,height=720");
@@ -720,11 +721,133 @@ export function TransactionsList({ t, locale, setRoute, transactions }) {
                 <td className="num"><strong>{fmtMXN(tx.totalMXN)}</strong></td>
                 <td className="mono subtle">{tx.broker}</td>
                 <td className="subtle" style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>{tx.notes || "—"}</td>
-                <td className="num"><button className="btn btn-sm btn-ghost">edit</button></td>
+                <td className="num"><button className="btn btn-sm btn-ghost" onClick={() => setRoute(`edit:${tx.id}`)}>{t("edit")}</button></td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    </main>
+  );
+}
+
+export function EditTransactionForm({ t, locale, setRoute, transaction, updateTransaction }) {
+  const [type, setType]     = useState(transaction.type);
+  const [date, setDate]     = useState(transaction.date);
+  const [ticker, setTicker] = useState(transaction.ticker);
+  const [qty, setQty]       = useState(transaction.qty);
+  const [price, setPrice]   = useState(transaction.priceUSD);
+  const [fx, setFx]         = useState(transaction.fxRate);
+  const [fees, setFees]     = useState(transaction.feesMXN);
+  const [notes, setNotes]   = useState(transaction.notes ?? "");
+  const [status, setStatus] = useState({ kind: "idle" });
+
+  const grossUSD = Number(qty) * Number(price);
+  const grossMXN = grossUSD * Number(fx);
+  const totalMXN = type === "BUY" ? grossMXN + Number(fees) : grossMXN - Number(fees);
+
+  const validate = () => {
+    if (!ticker.trim()) return locale === "es" ? "Falta el ticker." : "Ticker is required.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return locale === "es" ? "Fecha inválida (YYYY-MM-DD)." : "Invalid date (YYYY-MM-DD).";
+    if (!(Number(qty) > 0)) return locale === "es" ? "Cantidad debe ser > 0." : "Quantity must be > 0.";
+    if (!(Number(price) >= 0)) return locale === "es" ? "Precio inválido." : "Invalid price.";
+    if (!(Number(fx) > 0)) return locale === "es" ? "FX debe ser > 0." : "FX rate must be > 0.";
+    return null;
+  };
+
+  const handleSave = async () => {
+    const err = validate();
+    if (err) {
+      setStatus({ kind: "error", msg: err });
+      return;
+    }
+    const payload = {
+      trade_date: date,
+      type,
+      ticker: ticker.trim().toUpperCase(),
+      qty: Number(qty),
+      price_usd: Number(price),
+      fx_rate: Number(fx),
+      fees_mxn: Number(Number(fees).toFixed(2)),
+      notes: notes.trim() || null,
+    };
+    setStatus({ kind: "saving" });
+    try {
+      await updateTransaction(transaction.id, payload);
+      setRoute("transactions");
+    } catch (e) {
+      setStatus({ kind: "error", msg: e.message ?? String(e) });
+    }
+  };
+
+  return (
+    <main className="main">
+      <div className="page-head">
+        <div>
+          <h1>{t("edit_transaction")}</h1>
+          <div className="sub mono">{transaction.id}</div>
+        </div>
+        <div className="actions">
+          <button className="btn btn-sm" onClick={() => setRoute("transactions")} disabled={status.kind === "saving"}>{t("cancel")}</button>
+          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={status.kind === "saving"}>
+            {status.kind === "saving" ? (locale === "es" ? "Guardando…" : "Saving…") : t("save_changes")}
+          </button>
+        </div>
+      </div>
+
+      {status.kind === "error" && (
+        <div className="form-status error" role="alert" style={{ margin: "8px 16px", padding: "8px 12px", background: "var(--bg-chip)", color: "var(--neg)", border: "1px solid var(--neg)", borderRadius: 4, fontSize: 13 }}>
+          {status.msg}
+        </div>
+      )}
+
+      <div className="form-wrap">
+        <div className="form-main">
+          <div className="form-section">
+            <h3>{locale === "es" ? "Información básica" : "Basic info"}</h3>
+            <div className="form-row"><label>{t("transaction_type")}</label>
+              <div className="tabs" style={{ width: "fit-content" }}>
+                <button className={type === "BUY" ? "active" : ""} style={{ padding: "5px 16px" }} onClick={() => setType("BUY")}>{t("purchase")}</button>
+                <button className={type === "SELL" ? "active" : ""} style={{ padding: "5px 16px" }} onClick={() => setType("SELL")}>{t("sale")}</button>
+                <button className={type === "DIV" ? "active" : ""} style={{ padding: "5px 16px" }} onClick={() => setType("DIV")}>{t("dividend")}</button>
+              </div>
+            </div>
+            <div className="form-row"><label>{t("date")}</label>
+              <input value={date} onChange={e => setDate(e.target.value)} placeholder="YYYY-MM-DD" />
+            </div>
+            <div className="form-row"><label>{t("instrument")}</label>
+              <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} placeholder="AAPL" />
+            </div>
+            <div className="form-row"><label>{t("notes")}</label>
+              <textarea rows="2" value={notes} onChange={e => setNotes(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h3>{locale === "es" ? "Precio y cantidad" : "Price & quantity"}</h3>
+            <div className="form-row"><label>{t("quantity")}</label><input type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
+            <div className="form-row"><label>{t("unit_price")}</label>
+              <div className="input-suffix"><input type="number" step="0.01" value={price} onChange={e => setPrice(e.target.value)} /><span className="suffix">USD</span></div>
+            </div>
+            <div className="form-row"><label>{t("fx_rate")}</label>
+              <div className="input-suffix"><input type="number" step="0.0001" value={fx} onChange={e => setFx(e.target.value)} /><span className="suffix">MXN/USD</span></div>
+            </div>
+            <div className="form-row"><label>{t("fees")}</label>
+              <div className="input-suffix"><input type="number" step="0.01" value={fees} onChange={e => setFees(e.target.value)} /><span className="suffix">MXN</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div className="form-side">
+          <div className="calc-card">
+            <h4>{t("cost_breakdown")}</h4>
+            <div className="calc-row"><span className="lbl">{t("gross_amount")} (USD)</span><span>{fmtUSD(grossUSD)}</span></div>
+            <div className="calc-row subtle"><span className="lbl">× FX</span><span>{Number(fx).toFixed(4)}</span></div>
+            <div className="calc-row"><span className="lbl">{t("gross_amount")} (MXN)</span><span>{fmtMXN(grossMXN)}</span></div>
+            <div className="calc-row"><span className="lbl">{t("fees")}</span><span>{type === "BUY" ? "+" : "−"} {fmtMXN(Number(fees))}</span></div>
+            <div className="calc-row total"><span className="lbl">{t("total_mxn")}</span><span>{fmtMXN(totalMXN)}</span></div>
+          </div>
+        </div>
       </div>
     </main>
   );
@@ -1134,29 +1257,27 @@ export function ImportCSV({ t, locale, setRoute, transactions, addTransaction })
   );
 }
 
-export function TaxReport({ t, locale, taxBreakdown, realized }) {
+export function TaxReport({ t, locale, taxBreakdown, realized, transactions = [] }) {
   const [year, setYear] = useState(taxBreakdown.year);
   const [tb, setTb] = useState(taxBreakdown);
   const [loading, setLoading] = useState(false);
 
-  // Refetch when the user picks a different year. Falls back silently to the
-  // last successfully-loaded breakdown when the API is unreachable.
-  useEffect(() => {
-    if (year === tb.year) return;
-    let cancelled = false;
+  // Generate or update the breakdown for the selected year. When the API is
+  // unreachable (offline mode), derive it client-side from the realized lots.
+  const loadReport = (targetYear) => {
     setLoading(true);
-    api.taxBreakdown(year)
-      .then(d => { if (!cancelled) setTb(d); })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [year]); // eslint-disable-line react-hooks/exhaustive-deps
+    api.taxBreakdown(targetYear)
+      .then(d => setTb(d))
+      .catch(() => setTb(computeTaxBreakdown(realized, targetYear, taxBreakdown)))
+      .finally(() => setLoading(false));
+  };
 
   const yearOptions = React.useMemo(() => {
     const ys = new Set(realized.map(r => new Date(r.closeDate).getFullYear()));
+    for (const tx of transactions) ys.add(new Date(tx.date).getFullYear());
     ys.add(year); ys.add(taxBreakdown.year);
     return [...ys].sort((a, b) => b - a);
-  }, [realized, year, taxBreakdown.year]);
+  }, [realized, transactions, year, taxBreakdown.year]);
 
   const realizedForYear = React.useMemo(
     () => realized.filter(r => new Date(r.closeDate).getFullYear() === year),
@@ -1251,6 +1372,9 @@ export function TaxReport({ t, locale, taxBreakdown, realized }) {
           <select className="btn btn-sm" style={{ padding: "4px 8px" }} value={year} onChange={e => setYear(Number(e.target.value))}>
             {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
+          <button className="btn btn-sm" onClick={() => loadReport(year)} disabled={loading}>
+            {year === tb.year ? t("update_report") : t("generate_report")}
+          </button>
           <button className="btn btn-sm" onClick={exportCSV}>{t("export_csv")}</button>
           <button className="btn btn-primary btn-sm" onClick={exportPDF}>{t("export_pdf")}</button>
         </div>

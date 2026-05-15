@@ -1,8 +1,9 @@
 import { api } from "./api.js";
 import {
-  FX_USD_MXN, POSITIONS_RAW, TRANSACTIONS_RAW, REALIZED, ALLOCATION,
+  FX_USD_MXN, POSITIONS_RAW, TRANSACTIONS_RAW, ALLOCATION,
   PERFORMANCE, TAX_BREAKDOWN, enrichPositions, enrichTransactions,
 } from "./demoData.js";
+import { computeRealizedLots, computeTaxBreakdown } from "./fifo.js";
 
 export async function loadPortfolio() {
   try {
@@ -16,25 +17,31 @@ export async function loadPortfolio() {
       api.taxBreakdown().catch(() => null),
     ]);
     const rate = fx?.rate ?? FX_USD_MXN;
+    const txs = enrichTransactions(transactions ?? TRANSACTIONS_RAW);
+    // Offline: derive realized lots & tax breakdown from the ledger via FIFO,
+    // mirroring what the backend does in live mode.
+    const realizedLots = realized ?? computeRealizedLots(txs);
     return {
       fxRate: rate,
       positions: enrichPositions(positions ?? POSITIONS_RAW, rate),
-      transactions: enrichTransactions(transactions ?? TRANSACTIONS_RAW),
-      realized: realized ?? REALIZED,
+      transactions: txs,
+      realized: realizedLots,
       allocation: allocation ?? ALLOCATION,
       performance: performance ?? PERFORMANCE,
-      taxBreakdown: tax ?? TAX_BREAKDOWN,
+      taxBreakdown: tax ?? computeTaxBreakdown(realizedLots, TAX_BREAKDOWN.year, TAX_BREAKDOWN),
       isLive: !!(positions && transactions),
     };
   } catch {
+    const txs = enrichTransactions(TRANSACTIONS_RAW);
+    const realizedLots = computeRealizedLots(txs);
     return {
       fxRate: FX_USD_MXN,
       positions: enrichPositions(POSITIONS_RAW),
-      transactions: enrichTransactions(TRANSACTIONS_RAW),
-      realized: REALIZED,
+      transactions: txs,
+      realized: realizedLots,
       allocation: ALLOCATION,
       performance: PERFORMANCE,
-      taxBreakdown: TAX_BREAKDOWN,
+      taxBreakdown: computeTaxBreakdown(realizedLots, TAX_BREAKDOWN.year, TAX_BREAKDOWN),
       isLive: false,
     };
   }

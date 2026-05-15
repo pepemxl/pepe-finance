@@ -45,6 +45,17 @@ class TransactionIn(BaseModel):
     notes: str | None = None
 
 
+class TransactionUpdate(BaseModel):
+    trade_date: date
+    type: str
+    ticker: str
+    qty: float
+    price_usd: float
+    fx_rate: float
+    fees_mxn: float = 0.0
+    notes: str | None = None
+
+
 class RealizedOut(BaseModel):
     closeDate: date
     openDate: date

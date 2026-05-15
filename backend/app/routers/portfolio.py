@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .. import models, schemas
 from ..database import get_db
+from ..fifo import recompute_realized_lots
 
 router = APIRouter()
 
@@ -148,7 +149,7 @@ def create_transaction(payload: schemas.TransactionIn, db: Session = Depends(get
             or "—"
         )
 
-    return schemas.TransactionOut(
+    result = schemas.TransactionOut(
         id=tx.external_id,
         date=tx.trade_date,
         type=tx.type,
@@ -160,6 +161,68 @@ def create_transaction(payload: schemas.TransactionIn, db: Session = Depends(get
         broker=broker_name,
         notes=tx.notes,
     )
+    recompute_realized_lots(db)
+    return result
+
+
+@router.put("/transactions/{external_id}", response_model=schemas.TransactionOut)
+def update_transaction(
+    external_id: str, payload: schemas.TransactionUpdate, db: Session = Depends(get_db)
+):
+    tx = db.scalar(
+        select(models.Transaction).where(models.Transaction.external_id == external_id)
+    )
+    if not tx:
+        raise HTTPException(404, f"Unknown transaction: {external_id}")
+
+    instr = db.scalar(
+        select(models.Instrument).where(models.Instrument.ticker == payload.ticker)
+    )
+    if not instr:
+        raise HTTPException(404, f"Unknown ticker: {payload.ticker}")
+
+    tx.trade_date = payload.trade_date
+    tx.type = payload.type
+    tx.instrument_id = instr.id
+    tx.qty = Decimal(str(payload.qty))
+    tx.price_usd = Decimal(str(payload.price_usd))
+    tx.fx_rate = Decimal(str(payload.fx_rate))
+    tx.fees_mxn = Decimal(str(payload.fees_mxn))
+    tx.notes = payload.notes
+    db.commit()
+    db.refresh(tx)
+
+    broker_name = "—"
+    if tx.account_id:
+        broker_name = (
+            db.scalar(
+                select(models.Broker.name)
+                .join(models.Account)
+                .where(models.Account.id == tx.account_id)
+            )
+            or "—"
+        )
+
+    result = schemas.TransactionOut(
+        id=tx.external_id,
+        date=tx.trade_date,
+        type=tx.type,
+        ticker=instr.ticker,
+        qty=_f(tx.qty),
+        priceUSD=_f(tx.price_usd),
+        fxRate=_f(tx.fx_rate),
+        feesMXN=_f(tx.fees_mxn),
+        broker=broker_name,
+        notes=tx.notes,
+    )
+    recompute_realized_lots(db)
+    return result
+
+
+@router.post("/realized/recompute")
+def recompute_realized(db: Session = Depends(get_db)):
+    """Rebuild realized_lots from the current transactions ledger (FIFO)."""
+    return {"realized_lots": recompute_realized_lots(db)}
 
 
 @router.get("/realized", response_model=list[schemas.RealizedOut])

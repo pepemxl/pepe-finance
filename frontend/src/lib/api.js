@@ -6,9 +6,9 @@ async function get(path) {
   return r.json();
 }
 
-async function post(path, body) {
+async function send(method, path, body) {
   const r = await fetch(`${BASE}${path}`, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -20,6 +20,9 @@ async function post(path, body) {
   return r.json();
 }
 
+const post = (path, body) => send("POST", path, body);
+const put = (path, body) => send("PUT", path, body);
+
 export const api = {
   positions:         () => get("/positions"),
   transactions:      () => get("/transactions"),
@@ -29,4 +32,5 @@ export const api = {
   taxBreakdown:      (year) => get(year != null ? `/tax/breakdown?year=${year}` : "/tax/breakdown"),
   fxRate:            () => get("/fx/usd-mxn"),
   createTransaction: (payload) => post("/transactions", payload),
+  updateTransaction: (externalId, payload) => put(`/transactions/${externalId}`, payload),
 };

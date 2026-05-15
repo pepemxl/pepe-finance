@@ -138,6 +138,12 @@ dev-frontend: ## Run Vite dev server locally
 build-frontend: ## Production build of frontend → frontend/dist
 	cd $(FRONTEND) && npm run build
 
+##@ Tests
+
+.PHONY: test-backend
+test-backend: ## Run backend unit tests (pytest) inside the backend container
+	$(DC) exec -T $(BACKEND) sh -c "pip install -q -r requirements-dev.txt && python -m pytest -q"
+
 ##@ Housekeeping
 
 .PHONY: clean

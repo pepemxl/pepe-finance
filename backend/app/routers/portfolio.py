@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, func, select
@@ -220,9 +221,12 @@ def update_transaction(
 
 
 @router.post("/realized/recompute")
-def recompute_realized(db: Session = Depends(get_db)):
-    """Rebuild realized_lots from the current transactions ledger (FIFO)."""
-    return {"realized_lots": recompute_realized_lots(db)}
+def recompute_realized(
+    method: Literal["fifo", "average"] = "fifo",
+    db: Session = Depends(get_db),
+):
+    """Rebuild realized_lots from the transactions ledger using ``method``."""
+    return {"method": method, "realized_lots": recompute_realized_lots(db, method)}
 
 
 @router.get("/realized", response_model=list[schemas.RealizedOut])

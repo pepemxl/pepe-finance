@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { fmtMXN, fmtUSD, fmtPct, fmtDate } from "../lib/format.js";
 import { api } from "../lib/api.js";
 import { csvField, downloadBlob, timestampForFilename } from "../lib/export.js";
-import { computeTaxBreakdown } from "../lib/fifo.js";
+import { computeRealizedLots, computeTaxBreakdown } from "../lib/fifo.js";
 
 function printHtmlInPopup(title, body) {
   const w = window.open("", "_blank", "width=900,height=720");
@@ -1259,29 +1259,46 @@ export function ImportCSV({ t, locale, setRoute, transactions, addTransaction })
 
 export function TaxReport({ t, locale, taxBreakdown, realized, transactions = [] }) {
   const [year, setYear] = useState(taxBreakdown.year);
+  const [method, setMethod] = useState("fifo");
   const [tb, setTb] = useState(taxBreakdown);
+  // Local copy of realized lots so the closes table reflects the chosen method
+  // without having to refresh the entire app-level portfolio data.
+  const [realizedView, setRealizedView] = useState(realized);
   const [loading, setLoading] = useState(false);
 
-  // Generate or update the breakdown for the selected year. When the API is
-  // unreachable (offline mode), derive it client-side from the realized lots.
-  const loadReport = (targetYear) => {
+  // Generate or update the breakdown for the selected year + method. In live
+  // mode this triggers a backend recompute with the chosen method, then reads
+  // back the freshly computed lots and the breakdown. When the API is
+  // unreachable (offline mode) the same computation is done client-side.
+  const loadReport = async (targetYear) => {
     setLoading(true);
-    api.taxBreakdown(targetYear)
-      .then(d => setTb(d))
-      .catch(() => setTb(computeTaxBreakdown(realized, targetYear, taxBreakdown)))
-      .finally(() => setLoading(false));
+    try {
+      await api.recomputeRealized(method);
+      const [breakdown, lots] = await Promise.all([
+        api.taxBreakdown(targetYear),
+        api.realized(),
+      ]);
+      setTb(breakdown);
+      setRealizedView(lots);
+    } catch {
+      const r = computeRealizedLots(transactions, method);
+      setRealizedView(r);
+      setTb(computeTaxBreakdown(r, targetYear, taxBreakdown));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const yearOptions = React.useMemo(() => {
-    const ys = new Set(realized.map(r => new Date(r.closeDate).getFullYear()));
+    const ys = new Set(realizedView.map(r => new Date(r.closeDate).getFullYear()));
     for (const tx of transactions) ys.add(new Date(tx.date).getFullYear());
     ys.add(year); ys.add(taxBreakdown.year);
     return [...ys].sort((a, b) => b - a);
-  }, [realized, transactions, year, taxBreakdown.year]);
+  }, [realizedView, transactions, year, taxBreakdown.year]);
 
   const realizedForYear = React.useMemo(
-    () => realized.filter(r => new Date(r.closeDate).getFullYear() === year),
-    [realized, year],
+    () => realizedView.filter(r => new Date(r.closeDate).getFullYear() === year),
+    [realizedView, year],
   );
 
   const netGain = tb.shortTermGain + tb.longTermGain - tb.shortTermLoss - tb.longTermLoss;
@@ -1310,7 +1327,7 @@ export function TaxReport({ t, locale, taxBreakdown, realized, transactions = []
     rows.push([locale === "es" ? "Ganancia neta" : "Net gain", netGain.toFixed(2)].join(","));
     rows.push([locale === "es" ? "Tasa aplicada" : "Applied rate", tb.rateApplied].join(","));
     rows.push([locale === "es" ? "ISR a pagar" : "Tax owed", taxOwed.toFixed(2)].join(","));
-    downloadBlob(`tax_report_${year}.csv`, rows.join("\n"));
+    downloadBlob(`tax_report_${year}_${method}.csv`, rows.join("\n"));
   };
 
   const exportPDF = () => {
@@ -1372,6 +1389,10 @@ export function TaxReport({ t, locale, taxBreakdown, realized, transactions = []
           <select className="btn btn-sm" style={{ padding: "4px 8px" }} value={year} onChange={e => setYear(Number(e.target.value))}>
             {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
+          <div className="tabs" style={{ width: "fit-content" }} title={t("method")}>
+            <button className={method === "fifo" ? "active" : ""} onClick={() => setMethod("fifo")} disabled={loading}>FIFO</button>
+            <button className={method === "average" ? "active" : ""} onClick={() => setMethod("average")} disabled={loading}>{t("average")}</button>
+          </div>
           <button className="btn btn-sm" onClick={() => loadReport(year)} disabled={loading}>
             {year === tb.year ? t("update_report") : t("generate_report")}
           </button>

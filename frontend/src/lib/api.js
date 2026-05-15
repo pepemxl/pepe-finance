@@ -33,4 +33,5 @@ export const api = {
   fxRate:            () => get("/fx/usd-mxn"),
   createTransaction: (payload) => post("/transactions", payload),
   updateTransaction: (externalId, payload) => put(`/transactions/${externalId}`, payload),
+  recomputeRealized: (method = "fifo") => post(`/realized/recompute?method=${method}`),
 };

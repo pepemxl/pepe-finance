@@ -1,9 +1,13 @@
-/* Offline FIFO matching engine — JS port of backend/app/fifo.py.
+/* Offline realized-lot matching engines — JS port of backend/app/fifo.py.
  *
- * In live mode the backend derives realized_lots from the transactions ledger.
- * When the backend is unreachable, these helpers do the same client-side so
- * adding / editing a transaction still flows through to realized gains and the
- * tax report. */
+ * Two strategies are supported via the `method` parameter:
+ *  - "fifo"    (default): each SELL consumes BUY lots first-in-first-out.
+ *  - "average": each SELL is costed at the running weighted-average cost; the
+ *               realized lot's open_date is the earliest still-open BUY date.
+ *
+ * In live mode the backend computes these. When the backend is unreachable,
+ * these helpers do the same client-side so adding / editing a transaction or
+ * switching method still updates realized gains and the tax report. */
 
 import { POSITIONS_RAW } from "./demoData.js";
 
@@ -15,6 +19,7 @@ const MARKET_BY_TICKER = Object.fromEntries(
 );
 
 const round2 = (n) => Math.round(n * 100) / 100;
+const marketOf = (ticker) => MARKET_BY_TICKER[ticker] ?? "foreign";
 
 function txNum(id) {
   const m = typeof id === "string" && id.match(/(\d+)/);
@@ -25,14 +30,39 @@ function daysBetween(openDate, closeDate) {
   return Math.round((new Date(closeDate) - new Date(openDate)) / 86400000);
 }
 
-/* Rebuild realized lots from a transactions array via FIFO matching.
- * Returns objects shaped like the API's /realized payload. */
-export function computeRealizedLots(transactions) {
-  const txs = [...transactions]
+function sortedBuySell(transactions) {
+  return [...transactions]
     .filter(t => t.type === "BUY" || t.type === "SELL")
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : txNum(a.id) - txNum(b.id)));
+}
 
-  const openLots = new Map(); // ticker -> FIFO queue of { date, qty, unitCost }
+function realizedRow(tx, openDate, qty, costMxn, proceedsMxn) {
+  const days = daysBetween(openDate, tx.date);
+  return {
+    closeDate: tx.date,
+    openDate,
+    ticker: tx.ticker,
+    qty,
+    proceedsMXN: proceedsMxn,
+    costMXN: costMxn,
+    gainMXN: round2(proceedsMxn - costMxn),
+    days,
+    kind: days > LONG_TERM_DAYS ? "long" : "short",
+    market: marketOf(tx.ticker),
+  };
+}
+
+/* Build realized lots from a transactions array.
+ * `method` is "fifo" (default) or "average". */
+export function computeRealizedLots(transactions, method = "fifo") {
+  const txs = sortedBuySell(transactions);
+  if (method === "average") return matchAverage(txs);
+  if (method === "fifo")    return matchFifo(txs);
+  throw new Error(`Unknown matching method: ${method}`);
+}
+
+function matchFifo(txs) {
+  const openLots = new Map(); // ticker -> queue of { date, qty, unitCost }
   const realized = [];
 
   for (const tx of txs) {
@@ -57,27 +87,63 @@ export function computeRealizedLots(transactions) {
       const matched = Math.min(remaining, lot.qty);
       const cost = round2(matched * lot.unitCost);
       const proceeds = round2(matched * unitProceeds);
-      const days = daysBetween(lot.date, tx.date);
-      realized.push({
-        closeDate: tx.date,
-        openDate: lot.date,
-        ticker: tx.ticker,
-        qty: matched,
-        proceedsMXN: proceeds,
-        costMXN: cost,
-        gainMXN: round2(proceeds - cost),
-        days,
-        kind: days > LONG_TERM_DAYS ? "long" : "short",
-        market: MARKET_BY_TICKER[tx.ticker] ?? "foreign",
-      });
+      realized.push(realizedRow(tx, lot.date, matched, cost, proceeds));
       lot.qty -= matched;
       remaining -= matched;
       if (lot.qty <= 0) lots.shift();
     }
-    // remaining > 0 here means an oversold position (SELL without a matching
-    // BUY); the unmatched quantity is intentionally skipped.
+    // remaining > 0 means an oversold position; unmatched qty is skipped.
   }
+  return realized;
+}
 
+function matchAverage(txs) {
+  const openBuys = new Map(); // ticker -> queue of { date, qty }  (for open_date tracking)
+  const totals = new Map();   // ticker -> { qty, cost } running totals in MXN
+  const realized = [];
+
+  for (const tx of txs) {
+    const qty = Number(tx.qty);
+    if (!(qty > 0)) continue;
+    const unitNative = Number(tx.priceUSD) * Number(tx.fxRate);
+
+    if (tx.type === "BUY") {
+      const buyCost = qty * unitNative + Number(tx.feesMXN); // fees add to cost basis
+      if (!openBuys.has(tx.ticker)) openBuys.set(tx.ticker, []);
+      openBuys.get(tx.ticker).push({ date: tx.date, qty });
+      const t = totals.get(tx.ticker) ?? { qty: 0, cost: 0 };
+      t.qty += qty;
+      t.cost += buyCost;
+      totals.set(tx.ticker, t);
+      continue;
+    }
+
+    // SELL — costed at the running average; oversold qty is skipped.
+    const t = totals.get(tx.ticker);
+    if (!t || t.qty <= 0) continue;
+    const sellQty = Math.min(qty, t.qty);
+    const avg = t.cost / t.qty;
+    const costBasis = round2(sellQty * avg);
+    const unitProceeds = unitNative - Number(tx.feesMXN) / qty;
+    const proceeds = round2(sellQty * unitProceeds);
+
+    const buys = openBuys.get(tx.ticker) ?? [];
+    const openDate = buys.length > 0 ? buys[0].date : tx.date;
+    // Advance the queue so the next sell's open_date reflects what's still held.
+    let remaining = sellQty;
+    while (remaining > 0 && buys.length > 0) {
+      const front = buys[0];
+      const matched = Math.min(remaining, front.qty);
+      front.qty -= matched;
+      remaining -= matched;
+      if (front.qty <= 0) buys.shift();
+    }
+
+    realized.push(realizedRow(tx, openDate, sellQty, costBasis, proceeds));
+    t.qty -= sellQty;
+    t.cost -= costBasis;
+    if (t.qty <= 0) t.cost = 0;
+  }
   return realized;
 }
 
